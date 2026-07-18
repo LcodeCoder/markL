@@ -1,0 +1,129 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http: file:; font-src 'self' data:; script-src 'self' 'nonce-markl-importmap';" />
+  <title>MarkL</title>
+  <link rel="stylesheet" href="../../node_modules/@toast-ui/editor/dist/toastui-editor.css" />
+  <link rel="stylesheet" href="../../node_modules/@toast-ui/editor/dist/theme/toastui-editor-dark.css" />
+  <link rel="stylesheet" href="../../node_modules/prismjs/themes/prism.css" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="theme-light">
+  <div id="app-shell">
+    <aside id="sidebar" aria-label="文档目录">
+      <div class="brand-panel">
+        <img src="../../assets/logo-wordmark.png" alt="MarkL" class="brand-logo" />
+      </div>
+
+      <div class="sidebar-actions">
+        <button id="open-folder-button" class="primary-button" type="button" title="选择一个包含 Markdown 文档的文件夹">
+          <span class="button-icon" aria-hidden="true">＋</span>
+          <span>打开文件夹</span>
+        </button>
+        <button id="refresh-tree-button" class="icon-button hidden" type="button" title="刷新目录" aria-label="刷新目录">↻</button>
+      </div>
+
+      <div id="workspace-heading" class="workspace-heading hidden">
+        <span id="workspace-name"></span>
+      </div>
+
+      <nav id="file-tree" class="file-tree" aria-label="文件列表">
+        <div id="tree-empty" class="tree-empty">
+          <div class="empty-icon" aria-hidden="true">文</div>
+          <p>尚未打开文件夹</p>
+          <span>打开后可在这里浏览 Markdown 与文本文件</span>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span id="workspace-path">支持 .md、.markdown、.txt</span>
+      </div>
+    </aside>
+
+    <div id="sidebar-backdrop" aria-hidden="true"></div>
+
+    <main id="main-content">
+      <header id="document-header">
+        <div class="document-identity">
+          <button id="sidebar-toggle" class="icon-button" type="button" title="显示或隐藏目录栏" aria-label="显示或隐藏目录栏">☰</button>
+          <span class="document-icon" aria-hidden="true">M↓</span>
+          <div class="document-name-group">
+            <div class="document-title-row">
+              <span id="doc-title">未命名.md</span>
+              <span id="dirty-dot" class="hidden" title="有未保存的更改">●</span>
+            </div>
+            <span id="doc-path">新文档</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="new-button" class="text-button" type="button" title="新建文档（Ctrl+N）">新建</button>
+          <button id="open-button" class="text-button" type="button" title="打开文件（Ctrl+O）">打开</button>
+          <button id="save-button" class="accent-button" type="button" title="保存（Ctrl+S）">保存</button>
+        </div>
+      </header>
+
+      <section id="editor-wrap" aria-label="Markdown 编辑器">
+        <div id="editor"></div>
+        <div id="language-popup" class="language-popup hidden" role="listbox" aria-label="选择代码语言">
+          <div class="language-popup-header">
+            <span>选择代码语言</span>
+            <kbd>Esc</kbd>
+          </div>
+          <div id="language-query" class="language-query">输入语言名称，例如 java</div>
+          <div id="language-list" class="language-list"></div>
+          <div class="language-popup-footer">↑↓ 选择　Enter / Tab 确认</div>
+        </div>
+      </section>
+
+      <footer id="statusbar">
+        <div class="status-group">
+          <button id="status-sidebar-toggle" type="button" title="显示或隐藏目录栏">目录</button>
+          <span id="save-status">已保存</span>
+        </div>
+        <div class="status-group status-right">
+          <button id="mode-label" type="button" title="切换 Markdown 与所见即所得模式">Markdown</button>
+          <span id="encoding-label">UTF-8</span>
+          <span id="counts">0 字 · 0 字符</span>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <script src="../../node_modules/prismjs/prism.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-typescript.min.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-java.min.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-c.min.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-cpp.min.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-python.min.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-bash.min.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-json.min.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-markdown.min.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-sql.min.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-csharp.min.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-go.min.js"></script>
+  <script src="../../node_modules/prismjs/components/prism-rust.min.js"></script>
+
+  <script type="importmap" nonce="markl-importmap">
+  {
+    "imports": {
+      "@toast-ui/editor": "../../node_modules/@toast-ui/editor/dist/esm/index.js",
+      "orderedmap": "../../node_modules/orderedmap/dist/index.js",
+      "prosemirror-commands": "../../node_modules/prosemirror-commands/dist/index.js",
+      "prosemirror-history": "../../node_modules/prosemirror-history/dist/index.js",
+      "prosemirror-inputrules": "../../node_modules/prosemirror-inputrules/dist/index.js",
+      "prosemirror-keymap": "../../node_modules/prosemirror-keymap/dist/index.js",
+      "prosemirror-model": "../../node_modules/prosemirror-model/dist/index.js",
+      "prosemirror-state": "../../node_modules/prosemirror-state/dist/index.js",
+      "prosemirror-transform": "../../node_modules/prosemirror-transform/dist/index.js",
+      "prosemirror-view": "../../node_modules/prosemirror-view/dist/index.js",
+      "rope-sequence": "../../node_modules/rope-sequence/dist/index.js",
+      "w3c-keyname": "../../node_modules/w3c-keyname/index.js"
+    }
+  }
+  </script>
+  <script type="module" src="./renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+{
+  "name": "markl",
+  "version": "1.0.0",
+  "description": "MarkL - 面向中文用户的轻量 Markdown 编辑器",
+  "main": "src/main.js",
+  "author": "Haiyu Information",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "make-icon": "node scripts/make-icon.js",
+    "build": "npm run make-icon && electron-builder --win",
+    "dist": "npm run make-icon && electron-builder --win portable nsis"
+  },
+  "build": {
+    "appId": "com.haiyu.markl",
+    "productName": "MarkL",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*",
+      "!node_modules/.cache",
+      "!dist"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MarkL"
+    },
+    "fileAssociations": [
+      {
+        "ext": "md",
+        "name": "Markdown 文档",
+        "description": "MarkL Markdown 文档",
+        "icon": "assets/icon.ico"
+      },
+      {
+        "ext": "markdown",
+        "name": "Markdown 文档",
+        "description": "MarkL Markdown 文档",
+        "icon": "assets/icon.ico"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0",
+    "jimp": "^0.22.12",
+    "png-to-ico": "^2.1.8"
+  },
+  "dependencies": {
+    "@toast-ui/editor": "^3.2.2",
+    "@toast-ui/editor-plugin-code-syntax-highlight": "^3.1.0",
+    "prismjs": "^1.30.0"
+  }
+}

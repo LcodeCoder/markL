@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+
+# Temporary files and local smoke-test data
+.tmp-*/
+.tmp-*.txt
+*.tmp
+*.log
+PixPin_*.png
+
+# Electron / tool caches
+.cache/
+.electron/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Editor / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Test coverage
+coverage/

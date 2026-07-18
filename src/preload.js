@@ -1,0 +1,32 @@
+﻿const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('markl', {
+  openDialog: () => ipcRenderer.invoke('dialog:open'),
+  openFolderDialog: () => ipcRenderer.invoke('dialog:open-folder'),
+  refreshWorkspace: (rootPath) => ipcRenderer.invoke('workspace:refresh', rootPath),
+  saveAsDialog: (options) => ipcRenderer.invoke('dialog:save-as', options),
+  exportHtmlDialog: (options) => ipcRenderer.invoke('dialog:export-html', options),
+
+  writeFile: (options) => ipcRenderer.invoke('file:write', options),
+  readFile: (options) => ipcRenderer.invoke('file:read', options),
+
+  setTitle: (title) => ipcRenderer.send('app:set-title', title),
+  doClose: () => ipcRenderer.send('app:do-close'),
+
+  on: (channel, callback) => {
+    const allowed = [
+      'file:opened',
+      'menu:new',
+      'menu:open',
+      'menu:open-folder',
+      'menu:save',
+      'menu:save-as',
+      'menu:export-html',
+      'menu:toggle-mode',
+      'menu:toggle-sidebar',
+      'menu:theme',
+      'app:before-close'
+    ];
+    if (allowed.includes(channel)) ipcRenderer.on(channel, (_event, ...args) => callback(...args));
+  }
+});
