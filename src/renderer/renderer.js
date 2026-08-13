@@ -26,6 +26,8 @@ const LANGUAGE_ALIASES = {
 
 const VDITOR_CDN = new URL('../../node_modules/vditor', import.meta.url).href;
 const CONTENT_THEME_PATH = new URL('../../node_modules/vditor/dist/css/content-theme', import.meta.url).href;
+const HISTORY_KEY = 'markl-open-history';
+const HISTORY_LIMIT = 16;
 
 const state = {
   filePath: null,
@@ -60,7 +62,9 @@ const elements = {
   languageQueryInput: document.getElementById('language-query-input'),
   languageList: document.getElementById('language-list'),
   editorWrap: document.getElementById('editor-wrap'),
-  sourceEditor: document.getElementById('source-editor')
+  sourceEditor: document.getElementById('source-editor'),
+  historyList: document.getElementById('history-list'),
+  clearHistoryButton: document.getElementById('clear-history-button')
 };
 
 function normalizeMarkdown(content = '') {
@@ -120,6 +124,143 @@ function isPathInside(filePath, rootPath) {
   return normalizedFile === normalizedRoot || normalizedFile.startsWith(`${normalizedRoot}/`);
 }
 
+function samePath(left, right) {
+  return String(left || '').replace(/\\/g, '/').toLowerCase() === String(right || '').replace(/\\/g, '/').toLowerCase();
+}
+
+function parentDisplay(filePath) {
+  const parent = directoryName(filePath);
+  return parent === '新文档' ? '' : parent;
+}
+
+function readHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item) => item && item.path && (item.kind === 'file' || item.kind === 'folder'));
+  } catch {
+    return [];
+  }
+}
+
+function writeHistory(items) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, HISTORY_LIMIT)));
+}
+
+function rememberOpen(kind, filePath) {
+  if (!filePath || (kind !== 'file' && kind !== 'folder')) return;
+  const items = readHistory().filter((item) => !samePath(item.path, filePath));
+  items.unshift({
+    kind,
+    path: filePath,
+    name: baseName(filePath),
+    at: Date.now()
+  });
+  writeHistory(items);
+  renderHistory();
+}
+
+function forgetOpen(filePath) {
+  writeHistory(readHistory().filter((item) => !samePath(item.path, filePath)));
+  renderHistory();
+}
+
+function forgetOpenTree(targetPath) {
+  writeHistory(readHistory().filter((item) => !isPathInside(item.path, targetPath)));
+  renderHistory();
+}
+
+function rewriteHistoryPath(oldPath, nextPath) {
+  if (!oldPath || !nextPath || samePath(oldPath, nextPath)) return;
+  writeHistory(readHistory().map((item) => {
+    if (!samePath(item.path, oldPath)) return item;
+    return { ...item, path: nextPath, name: baseName(nextPath) };
+  }));
+  renderHistory();
+}
+
+function renderHistory() {
+  if (!elements.historyList) return;
+  const items = readHistory();
+  elements.clearHistoryButton.classList.toggle('hidden', !items.length);
+  elements.historyList.replaceChildren();
+
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-empty';
+    empty.textContent = '打开过的文件和文件夹会记在这里';
+    elements.historyList.appendChild(empty);
+    return;
+  }
+
+  items.forEach((item) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'history-item';
+
+    const openButton = document.createElement('button');
+    openButton.type = 'button';
+    openButton.className = 'history-row';
+    openButton.dataset.path = item.path;
+    openButton.dataset.kind = item.kind;
+    openButton.title = item.path;
+    if (item.kind === 'file' && samePath(item.path, state.filePath)) openButton.classList.add('is-active');
+    if (item.kind === 'folder' && samePath(item.path, state.workspaceRoot)) openButton.classList.add('is-active');
+
+    const copy = document.createElement('span');
+    copy.className = 'history-copy';
+    const name = document.createElement('span');
+    name.className = 'history-name';
+    name.textContent = item.name || baseName(item.path);
+    const pathLine = document.createElement('span');
+    pathLine.className = 'history-path';
+    pathLine.textContent = parentDisplay(item.path) || item.path;
+    copy.append(name, pathLine);
+
+    openButton.append(item.kind === 'folder' ? folderIcon() : fileIcon(), copy);
+    openButton.addEventListener('click', () => openHistoryItem(item));
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'history-remove';
+    remove.title = '从历史中移除';
+    remove.setAttribute('aria-label', `从历史中移除 ${item.name || baseName(item.path)}`);
+    remove.textContent = '×';
+    remove.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      forgetOpen(item.path);
+    });
+
+    wrap.append(openButton, remove);
+    elements.historyList.appendChild(wrap);
+  });
+}
+
+async function openHistoryItem(item) {
+  try {
+    const stat = await window.markl.statPath(item.path);
+    if (!stat?.exists) {
+      forgetOpen(item.path);
+      showOperationError('打开历史', new Error('这个文件或文件夹已经不在了，已从历史里去掉。'));
+      return;
+    }
+    if (item.kind === 'folder' || stat.kind === 'directory') {
+      const payload = await window.markl.refreshWorkspace(item.path);
+      if (payload) {
+        applyWorkspace(payload);
+        rememberOpen('folder', payload.rootPath);
+      }
+      return;
+    }
+    if (item.path === state.filePath) return;
+    if (!(await confirmDiscardIfDirty())) return;
+    const result = await window.markl.readFile({ filePath: stat.path || item.path });
+    loadContent(result.filePath, result.content);
+  } catch (error) {
+    showOperationError(item.kind === 'folder' ? '打开文件夹' : '打开文件', error);
+  }
+}
+
 function updateTitle() {
   const name = baseName(state.filePath);
   elements.docTitle.textContent = name;
@@ -163,6 +304,7 @@ function loadContent(filePath, content) {
   setMarkdown(normalized, true);
   markClean(normalized);
   updateCounts();
+  if (filePath) rememberOpen('file', filePath);
   focusEditor();
 }
 
@@ -229,6 +371,7 @@ async function doSaveAs() {
     await window.markl.writeFile({ filePath: target, content });
     state.filePath = target;
     markClean(content);
+    rememberOpen('file', target);
     if (isPathInside(target, state.workspaceRoot)) await refreshWorkspace();
     return true;
   } catch (error) {
@@ -432,6 +575,11 @@ function updateActiveTreeItem() {
     row.classList.toggle('is-active', active);
     row.classList.toggle('is-dirty', active && state.dirty);
   });
+  document.querySelectorAll('.history-row').forEach((row) => {
+    const fileActive = row.dataset.kind === 'file' && samePath(row.dataset.path, state.filePath);
+    const folderActive = row.dataset.kind === 'folder' && samePath(row.dataset.path, state.workspaceRoot);
+    row.classList.toggle('is-active', Boolean(fileActive || folderActive));
+  });
 }
 
 function applyWorkspace(payload) {
@@ -453,7 +601,10 @@ function applyWorkspace(payload) {
 async function doOpenFolder() {
   try {
     const payload = await window.markl.openFolderDialog();
-    if (payload) applyWorkspace(payload);
+    if (payload) {
+      applyWorkspace(payload);
+      rememberOpen('folder', payload.rootPath);
+    }
   } catch (error) {
     showOperationError('打开文件夹', error);
   }
@@ -539,6 +690,7 @@ async function commitTreeDraft(rawValue) {
     } else if (draft.mode === 'rename' && draft.targetPath) {
       const nextPath = await window.markl.renamePath({ oldPath: draft.targetPath, name: value });
       if (state.filePath === draft.targetPath) state.filePath = nextPath;
+      rewriteHistoryPath(draft.targetPath, nextPath);
       await refreshWorkspace();
       updateTitle();
     }
@@ -606,6 +758,7 @@ async function handleTreeAction(action, kind, targetPath) {
         markClean('');
         updateCounts();
       }
+      forgetOpenTree(targetPath);
       await refreshWorkspace();
     } catch (error) {
       showOperationError('删除', error);
@@ -765,20 +918,54 @@ function closeLanguagePopup() {
   elements.languagePopup.classList.add('hidden');
 }
 
+let highlightingPreviews = false;
+let highlightTimer = 0;
+
+function previewLanguage(block, code) {
+  const info = block?.querySelector('[data-type="code-block-info"]');
+  const classLang = (code.className.match(/language-([\w#+-]+)/i) || [])[1];
+  return canonicalLanguage(
+    (info?.textContent || '').replace(/[\u200b\u00a0]/g, '').trim()
+    || block?.dataset.lang
+    || classLang
+    || ''
+  );
+}
+
+function hasHighlightSpans(code) {
+  return Boolean(code.querySelector('span[class*="hljs-"]'));
+}
+
 function highlightCodePreviews() {
   if (!window.hljs) return;
-  document.querySelectorAll('[data-type="code-block"] .vditor-ir__preview code').forEach((code) => {
-    const block = code.closest('[data-type="code-block"]');
-    const info = block?.querySelector('[data-type="code-block-info"]');
-    const classLang = (code.className.match(/language-([\w#+-]+)/i) || [])[1];
-    const language = canonicalLanguage((info?.textContent || '').replace(/[\u200b\u00a0]/g, '').trim() || classLang || '');
-    if (!language || !window.hljs.getLanguage(language)) return;
-    const source = code.textContent.replace(/\u200b/g, '');
-    if (code.dataset.marklHl === `${language}\0${source}`) return;
-    code.className = `language-${language} hljs`;
-    code.innerHTML = window.hljs.highlight(source, { language, ignoreIllegals: true }).value;
-    code.dataset.marklHl = `${language}\0${source}`;
-  });
+  highlightingPreviews = true;
+  try {
+    document.querySelectorAll('[data-type="code-block"] .vditor-ir__preview code').forEach((code) => {
+      const block = code.closest('[data-type="code-block"]');
+      if (block?.classList.contains('vditor-ir__node--expand')) return;
+      const language = previewLanguage(block, code);
+      if (!language || language === 'text' || !window.hljs.getLanguage(language)) return;
+      const source = code.textContent.replace(/\u200b/g, '');
+      const key = `${language}\0${source}`;
+      if (code.dataset.marklHl === key && hasHighlightSpans(code)) return;
+      code.className = `language-${language} hljs`;
+      code.innerHTML = window.hljs.highlight(source, { language, ignoreIllegals: true }).value;
+      code.dataset.marklHl = key;
+      if (block) block.dataset.lang = language;
+    });
+  } finally {
+    highlightingPreviews = false;
+  }
+}
+
+function scheduleCodeHighlight() {
+  updateLiveHighlight();
+  highlightCodePreviews();
+  window.clearTimeout(highlightTimer);
+  highlightTimer = window.setTimeout(() => {
+    highlightCodePreviews();
+    updateLiveHighlight();
+  }, 90);
 }
 
 function liveHighlightLayer() {
@@ -821,8 +1008,22 @@ function updateLiveHighlight() {
 }
 
 function decorateCodeBlocks() {
-  highlightCodePreviews();
-  updateLiveHighlight();
+  scheduleCodeHighlight();
+}
+
+function watchCodeHighlight() {
+  const root = document.getElementById('editor');
+  if (!root || root.dataset.marklWatch === '1') return;
+  root.dataset.marklWatch = '1';
+  const observer = new MutationObserver(() => {
+    if (state.sourceMode || highlightingPreviews) return;
+    window.clearTimeout(highlightTimer);
+    highlightTimer = window.setTimeout(() => {
+      highlightCodePreviews();
+      updateLiveHighlight();
+    }, 90);
+  });
+  observer.observe(root, { childList: true, subtree: true, characterData: true });
 }
 
 function applyLanguageToActiveBlock(lang) {
@@ -986,15 +1187,13 @@ function createVditor() {
       if (state.savedContent) vditor.setValue(state.savedContent, true);
       else markClean(getMarkdown());
       decorateCodeBlocks();
+      watchCodeHighlight();
       focusEditor();
       updateCounts();
     },
     input() {
       recomputeDirty();
-      updateLiveHighlight();
-      if (!document.querySelector('[data-type="code-block"].vditor-ir__node--expand')) {
-        highlightCodePreviews();
-      }
+      scheduleCodeHighlight();
     },
     keydown(event) {
       if (event.isComposing) return;
@@ -1009,7 +1208,7 @@ document.getElementById('new-tree-button').addEventListener('click', startRootDo
 document.getElementById('new-button').addEventListener('click', doNew);
 elements.fileTree.addEventListener('contextmenu', onTreeContextMenu);
 elements.sidebar.addEventListener('contextmenu', (event) => {
-  if (event.target.closest('#file-tree')) return;
+  if (event.target.closest('#file-tree, #open-history')) return;
   onTreeContextMenu(event);
 });
 document.getElementById('open-button').addEventListener('click', doOpen);
@@ -1039,10 +1238,7 @@ document.getElementById('editor').addEventListener('keyup', (event) => {
 
 document.addEventListener('selectionchange', () => {
   if (state.sourceMode) return;
-  updateLiveHighlight();
-  if (!document.querySelector('[data-type="code-block"].vditor-ir__node--expand')) {
-    highlightCodePreviews();
-  }
+  scheduleCodeHighlight();
 });
 
 elements.editorWrap.addEventListener('scroll', updateLiveHighlight, true);
@@ -1069,9 +1265,9 @@ window.markl.on('app:before-close', async () => {
   if (await confirmDiscardIfDirty()) window.markl.doClose();
 });
 
-document.addEventListener('selectionchange', () => {
+document.addEventListener('click', () => {
   if (state.sourceMode) return;
-  highlightIdleCodeBlocks();
+  scheduleCodeHighlight();
 });
 
 document.addEventListener('keydown', (event) => {
@@ -1091,8 +1287,16 @@ window.addEventListener('resize', () => {
   if (state.popup.visible) positionLanguagePopup();
 });
 
+elements.clearHistoryButton.addEventListener('click', () => {
+  if (!readHistory().length) return;
+  if (!window.confirm('确定清空全部打开历史？')) return;
+  writeHistory([]);
+  renderHistory();
+});
+
 setTheme(localStorage.getItem('markl-theme') || 'light');
 updateTitle();
 updateCounts();
 renderFileTree();
+renderHistory();
 createVditor();

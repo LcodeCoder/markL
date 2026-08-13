@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('markl', {
   renamePath: (options) => ipcRenderer.invoke('file:rename', options),
   deletePath: (options) => ipcRenderer.invoke('file:delete', options),
   revealInFolder: (targetPath) => ipcRenderer.invoke('shell:reveal', targetPath),
+  statPath: (targetPath) => ipcRenderer.invoke('path:stat', targetPath),
   showTreeMenu: (payload) => ipcRenderer.invoke('tree:context-menu', payload),
   formatCode: (options) => ipcRenderer.invoke('code:format', options),
 

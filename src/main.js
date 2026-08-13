@@ -301,6 +301,18 @@ ipcMain.handle('file:write', async (_event, { filePath, content }) => {
 
 ipcMain.handle('file:read', async (_event, { filePath }) => readDocument(filePath));
 
+ipcMain.handle('path:stat', async (_event, targetPath) => {
+  if (!targetPath) return { exists: false };
+  const resolved = path.resolve(targetPath);
+  if (!fs.existsSync(resolved)) return { exists: false, path: resolved };
+  const stat = fs.statSync(resolved);
+  return {
+    exists: true,
+    path: resolved,
+    kind: stat.isDirectory() ? 'directory' : 'file'
+  };
+});
+
 const beautify = require('js-beautify');
 
 function indentPlain(code) {

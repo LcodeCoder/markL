@@ -9,7 +9,9 @@
     "start": "node scripts/dev-launch.js",
     "make-icon": "node scripts/make-icon.js",
     "build": "npm run make-icon && electron-builder --win",
-    "dist": "npm run make-icon && electron-builder --win portable nsis"
+    "build:mac": "npm run make-icon && electron-builder --mac",
+    "dist": "npm run make-icon && electron-builder --win portable nsis",
+    "dist:all": "npm run make-icon && electron-builder --win portable nsis && electron-builder --mac zip"
   },
   "build": {
     "appId": "com.haiyu.markl",
@@ -37,6 +39,29 @@
           "target": "portable",
           "arch": [
             "x64"
+          ]
+        }
+      ]
+    },
+    "mac": {
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
           ]
         }
       ]

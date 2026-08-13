@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MarkL — 面向中文用户的轻量 Markdown 编辑器</title>
+  <meta name="description" content="MarkL 是 Typora 式的中文 Markdown 编辑器：单栏即时渲染、文件树工作区、代码高亮、打开历史。支持 Windows。" />
+  <link rel="icon" href="./brand/logo-mark.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="site-nav">
+    <div class="wrap">
+      <a class="brand-link" href="#top">
+        <img src="./brand/logo-mark.png" alt="" />
+        MarkL
+      </a>
+      <nav class="nav-links" aria-label="页面章节">
+        <a href="#features">功能</a>
+        <a href="#languages">语言</a>
+        <a href="#shortcuts">快捷键</a>
+        <a href="#download">下载</a>
+        <a href="../README.md">仓库说明</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top" class="wrap">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Haiyu Information · Release 1.0.1</p>
+        <img class="wordmark" src="./brand/logo-wordmark.png" alt="MarkL" />
+        <h1>像写纸稿一样写 Markdown</h1>
+        <p class="lede">
+          MarkL 面向中文作者：打开就是一篇正在排版的文档，不是左边源码、右边预览的两页纸。
+          文件树管目录，灰框代码带语言标签和高亮，写完可以导出独立 HTML。
+        </p>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://github.com/LcodeCoder/markL/releases/download/1.0.1/MarkL.1.0.0.exe">下载 Windows 绿色版</a>
+          <a class="btn btn-ghost" href="#features">看全部功能</a>
+          <a class="btn btn-ghost" href="https://github.com/LcodeCoder/markL/releases/latest">GitHub Release</a>
+        </div>
+      </div>
+
+      <figure class="shot-frame" aria-label="MarkL 主界面截图">
+        <img class="app-shot" src="./app.png" alt="MarkL 主界面：左侧打开历史，右侧即时渲染编辑区" />
+      </figure>
+    </section>
+
+    <section class="section" id="features">
+      <p class="eyebrow">Features</p>
+      <h2>功能说明</h2>
+      <p>下面按你实际会用到的顺序写，和当前 1.0.0 桌面端一致，不是规划清单。</p>
+
+      <ol class="feature-list">
+        <li class="feature">
+          <h3>1. Typora 式即时渲染</h3>
+          <p>默认单栏。输入 <code>#</code> 加空格就是标题；列表、引用、表格、链接、图片马上排出来。支持 HTML 片段。可一键切到 Markdown 源码再切回来。正文跟窗口变宽，不再锁在中间一条窄栏。</p>
+        </li>
+        <li class="feature">
+          <h3>2. 代码块：语言、灰框、高亮、格式化</h3>
+          <ul>
+            <li>输入三个反引号后回车，弹出语言列表；可搜 <code>java</code>、<code>js</code>、<code>py</code> 等别名。</li>
+            <li>选定后灰框顶部出现语言标签，关键字带颜色。</li>
+            <li>光标在框里边写边亮；点到外面，灰框里的颜色会留下来。</li>
+            <li><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>L</kbd> 格式化当前代码块。JS / TS / JSON / CSS / HTML 走 js-beautify，其余按缩进整理。</li>
+          </ul>
+        </li>
+        <li class="feature">
+          <h3>3. 文件夹工作区与文件树</h3>
+          <ul>
+            <li>打开文件夹后列出 <code>.md</code> / <code>.markdown</code> / <code>.txt</code>，空目录也会显示。</li>
+            <li>点击展开文件夹、打开文档；当前文件高亮，未保存有红点。</li>
+            <li>右键可新建文档、新建文件夹、重命名、删除、在资源管理器中显示。名字在树里直接改。</li>
+            <li>扫描上限 16 层、2500 项；跳过 <code>.git</code>、<code>node_modules</code>、<code>dist</code> 等目录。</li>
+          </ul>
+        </li>
+        <li class="feature">
+          <h3>4. 打开历史</h3>
+          <p>文件树下方记录最近打开的文件和文件夹，最多 16 条。点击重新打开；路径没了会自动剔除。可以单条删除或全部清空。记录存在本机，不上传。</p>
+        </li>
+        <li class="feature">
+          <h3>5. 保存、另存为、未保存保护</h3>
+          <p>新建、打开、保存、另存为都有菜单和快捷键。切换文件或退出时，若有未保存修改会中文确认。文档按 UTF-8 读写。安装后可双击 <code>.md</code> / <code>.markdown</code> 用 MarkL 打开。</p>
+        </li>
+        <li class="feature">
+          <h3>6. 导出 HTML</h3>
+          <p>「文件 → 导出 HTML」生成带基础样式的独立网页：标题、段落、表格、灰底代码块都在，发给别人用浏览器就能看。</p>
+        </li>
+        <li class="feature">
+          <h3>7. 浅色 / 深色主题</h3>
+          <p>菜单「主题」切换，选择会记住。侧栏、正文、代码框、语言弹窗、状态栏一起变，不会只换背景漏掉字。</p>
+        </li>
+        <li class="feature">
+          <h3>8. 状态栏与目录栏</h3>
+          <p>底部显示保存状态、即时渲染或源码、UTF-8、按中文习惯统计的字数和字符数。<kbd>Ctrl</kbd>+<kbd>B</kbd> 收起目录栏；窄窗口里目录栏改成抽屉。</p>
+        </li>
+        <li class="feature">
+          <h3>9. Windows 桌面身份</h3>
+          <p>任务栏和跳转列表写的是 MarkL，不是 Electron。安装包可加桌面 / 开始菜单快捷方式，并关联 Markdown 文件。同时提供安装版和绿色版。</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="section" id="languages">
+      <p class="eyebrow">Languages</p>
+      <h2>代码语言</h2>
+      <p>三个反引号回车后可搜中文说明、正式名或别名。</p>
+      <table>
+        <thead>
+          <tr><th>语言</th><th>别名</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>JavaScript</td><td>js, node</td><td>网页与 Node.js</td></tr>
+          <tr><td>TypeScript</td><td>ts</td><td>带类型的 JavaScript</td></tr>
+          <tr><td>Java</td><td>java</td><td>Java 代码</td></tr>
+          <tr><td>Python</td><td>py</td><td>Python 脚本</td></tr>
+          <tr><td>HTML</td><td>markup, xml</td><td>网页标记</td></tr>
+          <tr><td>CSS</td><td>css</td><td>网页样式</td></tr>
+          <tr><td>JSON</td><td>json</td><td>结构化数据</td></tr>
+          <tr><td>Shell / Bash</td><td>sh, shell</td><td>命令行脚本</td></tr>
+          <tr><td>C / C++ / C#</td><td>c, cpp, cs</td><td>系统与 .NET</td></tr>
+          <tr><td>SQL / Go / Rust</td><td>sql, golang, rs</td><td>数据库与系统语言</td></tr>
+          <tr><td>Markdown / 纯文本</td><td>md, txt</td><td>文档或不做高亮</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section" id="shortcuts">
+      <p class="eyebrow">Keyboard</p>
+      <h2>快捷键</h2>
+      <table>
+        <thead>
+          <tr><th>按键</th><th>作用</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>新建文档</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>打开文件</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>打开文件夹</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>保存</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>另存为</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>即时渲染 ⇄ 源码</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>显示或隐藏目录栏</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>L</kbd></td><td>格式化当前代码块</td></tr>
+          <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Enter</kbd> <kbd>Esc</kbd></td><td>选择或关闭代码语言</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section" id="download">
+      <p class="eyebrow">Download</p>
+      <h2>下载</h2>
+      <div class="download">
+        <p>exe 已经放在 GitHub Release <strong>1.0.1</strong>，Windows 10 / 11 64 位绿色版，下载后直接打开。</p>
+        <ul>
+          <li><a href="https://github.com/LcodeCoder/markL/releases/download/1.0.1/MarkL.1.0.0.exe"><strong>MarkL.1.0.0.exe</strong></a> — 绿色版，约 75 MB</li>
+        </ul>
+        <p>发布页：<a href="https://github.com/LcodeCoder/markL/releases/tag/1.0.1">1.0.1</a>。macOS 需要在 Mac 上运行 <code>npm run build:mac</code>，或走仓库里的 GitHub Actions。</p>
+        <p>
+          <a class="btn btn-primary" href="https://github.com/LcodeCoder/markL/releases/download/1.0.1/MarkL.1.0.0.exe">下载 exe</a>
+          <a class="btn btn-ghost" href="https://github.com/LcodeCoder/markL/releases/latest">打开 Release</a>
+          <a class="btn btn-ghost" href="../README.md">开发与打包说明</a>
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">MarkL · Haiyu Information · MIT License</div>
+  </footer>
+</body>
+</html>
