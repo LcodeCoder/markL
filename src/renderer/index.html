@@ -17,36 +17,51 @@
         <img src="../../assets/logo-wordmark.png" alt="MarkL" class="brand-logo" />
       </div>
 
-      <div class="sidebar-actions">
-        <button id="open-folder-button" class="primary-button" type="button" title="选择一个包含 Markdown 文档的文件夹">
-          打开文件夹
+      <div class="sidebar-tabs" role="tablist" aria-label="侧栏视图">
+        <button id="tab-files" class="sidebar-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="files-panel" title="工作区文件目录">
+          目录
         </button>
-        <button id="new-tree-button" class="icon-button hidden" type="button" title="新建文档" aria-label="新建文档">
-          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8 2.75a.75.75 0 0 1 .75.75v3.75H12.5a.75.75 0 0 1 0 1.5H8.75V12.5a.75.75 0 0 1-1.5 0V8.75H3.5a.75.75 0 0 1 0-1.5h3.75V3.5A.75.75 0 0 1 8 2.75Z"/></svg>
-        </button>
-        <button id="refresh-tree-button" class="icon-button hidden" type="button" title="刷新目录" aria-label="刷新目录">
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M3.2 8a4.8 4.8 0 0 1 8.14-3.4l.76-.76A.7.7 0 0 1 13.3 4.3v2.5a.6.6 0 0 1-.6.6H10.2a.7.7 0 0 1-.5-1.2l.7-.7A3.4 3.4 0 1 0 11.4 9.7a.7.7 0 1 1 1.24.64A4.8 4.8 0 0 1 3.2 8Z"/></svg>
+        <button id="tab-outline" class="sidebar-tab" type="button" role="tab" aria-selected="false" aria-controls="outline-panel" title="当前文档的标题结构">
+          结构
         </button>
       </div>
 
-      <div id="workspace-heading" class="workspace-heading hidden">
-        <span id="workspace-name"></span>
+      <div id="files-panel" class="sidebar-panel" role="tabpanel" aria-labelledby="tab-files">
+        <div class="sidebar-actions">
+          <button id="open-folder-button" class="primary-button" type="button" title="选择一个包含 Markdown 文档的文件夹">
+            打开文件夹
+          </button>
+          <button id="new-tree-button" class="icon-button hidden" type="button" title="新建文档" aria-label="新建文档">
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8 2.75a.75.75 0 0 1 .75.75v3.75H12.5a.75.75 0 0 1 0 1.5H8.75V12.5a.75.75 0 0 1-1.5 0V8.75H3.5a.75.75 0 0 1 0-1.5h3.75V3.5A.75.75 0 0 1 8 2.75Z"/></svg>
+          </button>
+          <button id="refresh-tree-button" class="icon-button hidden" type="button" title="刷新目录" aria-label="刷新目录">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M3.2 8a4.8 4.8 0 0 1 8.14-3.4l.76-.76A.7.7 0 0 1 13.3 4.3v2.5a.6.6 0 0 1-.6.6H10.2a.7.7 0 0 1-.5-1.2l.7-.7A3.4 3.4 0 1 0 11.4 9.7a.7.7 0 1 1 1.24.64A4.8 4.8 0 0 1 3.2 8Z"/></svg>
+          </button>
+        </div>
+
+        <div id="workspace-heading" class="workspace-heading hidden">
+          <span id="workspace-name"></span>
+        </div>
+
+        <nav id="file-tree" class="file-tree" aria-label="文件列表">
+          <div id="tree-empty" class="tree-empty">
+            <p>还没有打开文件夹</p>
+            <span>打开后，左侧会列出文档。在空白处右键即可新建页面。</span>
+          </div>
+        </nav>
+
+        <section id="open-history" class="open-history" aria-label="打开历史">
+          <div class="history-heading">
+            <span>打开历史</span>
+            <button id="clear-history-button" class="history-clear hidden" type="button" title="清空打开历史">清空</button>
+          </div>
+          <div id="history-list" class="history-list"></div>
+        </section>
       </div>
 
-      <nav id="file-tree" class="file-tree" aria-label="文件列表">
-        <div id="tree-empty" class="tree-empty">
-          <p>还没有打开文件夹</p>
-          <span>打开后，左侧会列出文档。在空白处右键即可新建页面。</span>
-        </div>
-      </nav>
-
-      <section id="open-history" class="open-history" aria-label="打开历史">
-        <div class="history-heading">
-          <span>打开历史</span>
-          <button id="clear-history-button" class="history-clear hidden" type="button" title="清空打开历史">清空</button>
-        </div>
-        <div id="history-list" class="history-list"></div>
-      </section>
+      <div id="outline-panel" class="sidebar-panel hidden" role="tabpanel" aria-labelledby="tab-outline">
+        <nav id="heading-tree" class="heading-tree" aria-label="文档标题结构"></nav>
+      </div>
 
       <div class="sidebar-footer">
         <span id="workspace-path">.md · .markdown · .txt</span>
@@ -74,6 +89,9 @@
           <button id="new-button" class="text-button" type="button" title="新建文档（Ctrl+N）">新建</button>
           <button id="open-button" class="text-button" type="button" title="打开文件（Ctrl+O）">打开</button>
           <button id="save-button" class="accent-button" type="button" title="保存（Ctrl+S）">保存</button>
+          <a id="github-link" class="icon-button github-link" href="https://github.com/LcodeCoder/markL" target="_blank" rel="noreferrer" title="在 GitHub 上打开 MarkL" aria-label="在 GitHub 上打开 MarkL">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          </a>
         </div>
       </header>
 

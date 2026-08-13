@@ -227,11 +227,15 @@ function buildMenu() {
       label: '帮助',
       submenu: [
         {
+          label: 'GitHub 仓库',
+          click: () => shell.openExternal('https://github.com/LcodeCoder/markL')
+        },
+        {
           label: '关于 MarkL',
           click: () => dialog.showMessageBox(mainWindow, {
             type: 'info',
             title: '关于 MarkL',
-            message: 'MarkL 1.0.0',
+            message: 'MarkL 1.0.2',
             detail: '面向中文用户的轻量 Markdown 编辑器。\n支持目录管理、实时预览与代码语法高亮。',
             buttons: ['确定']
           })
@@ -421,6 +425,14 @@ ipcMain.handle('shell:reveal', async (_event, targetPath) => {
   const resolved = path.resolve(targetPath);
   if (!fs.existsSync(resolved)) throw new Error('目标不存在。');
   shell.showItemInFolder(resolved);
+  return true;
+});
+
+ipcMain.handle('shell:open-external', async (_event, url) => {
+  if (typeof url !== 'string' || !/^https:\/\//i.test(url)) {
+    throw new Error('仅支持 HTTPS 链接。');
+  }
+  await shell.openExternal(url);
   return true;
 });
 

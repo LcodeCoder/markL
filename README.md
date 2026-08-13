@@ -15,14 +15,14 @@
 
 <p align="center">
   <a href="docs/index.html">产品介绍页</a> ·
-  <a href="https://github.com/LcodeCoder/markL/releases/download/1.0.1/MarkL.1.0.0.exe">下载 Windows 绿色版</a> ·
+  <a href="https://github.com/LcodeCoder/markL/releases/download/1.0.2/MarkL.1.0.2.exe">下载 Windows 绿色版</a> ·
   <a href="https://github.com/LcodeCoder/markL/releases/latest">GitHub Release</a> ·
   <a href="PRODUCT.md">产品说明</a> ·
   <a href="DESIGN.md">设计规范</a>
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-1.0.0-1674a6" />
+  <img alt="version" src="https://img.shields.io/badge/version-1.0.2-1674a6" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows-0f5e88" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-6a7381" />
   <img alt="electron" src="https://img.shields.io/badge/Electron-32-1a1f27" />
@@ -59,7 +59,7 @@ MarkL 是海鱼信息（Haiyu Information）做的桌面 Markdown 编辑器。�
 - 想要比记事本直观、又比完整 IDE 轻的写作环境
 - 需要在文档里写代码，并且立刻看到关键字颜色
 
-当前正式下载是 GitHub Release **[1.0.1](https://github.com/LcodeCoder/markL/releases/tag/1.0.1)** 里的 Windows 绿色版。macOS 的图标和打包配置已经备好，需要在 Mac 上或通过 GitHub Actions 出包。
+当前正式下载是 GitHub Release **[1.0.2](https://github.com/LcodeCoder/markL/releases/tag/1.0.2)** 里的 Windows 绿色版。macOS 的图标和打包配置已经备好，需要在 Mac 上或通过 GitHub Actions 出包。
 
 ## 静态介绍页
 
@@ -90,8 +90,8 @@ MarkL 是海鱼信息（Haiyu Information）做的桌面 Markdown 编辑器。�
 └───────────────────────────┴──────────────────────────────────────────┘
 ```
 
-- **左侧**：品牌、打开文件夹、文件树、打开历史。
-- **右侧上方**：当前文件名、未保存圆点、完整路径、新建 / 打开 / 保存。
+- **左侧**：品牌、「目录 / 结构」切换、打开文件夹、文件树或标题结构树、打开历史。
+- **右侧上方**：当前文件名、未保存圆点、完整路径、新建 / 打开 / 保存、GitHub。
 - **中间**：Vditor 即时渲染编辑区，正文铺满可用宽度。
 - **底部**：保存状态、即时渲染 / 源码切换、编码、中文友好的字数统计。
 
@@ -133,7 +133,9 @@ MarkL 是海鱼信息（Haiyu Information）做的桌面 Markdown 编辑器。�
 
 ### 3. 文件夹工作区与文件树
 
-「打开文件夹」之后，左侧列出这个目录里的 Markdown 和文本：
+Logo 下方有两个 tab：**目录** 看工作区文件树，**结构** 按当前文档的 `#` / `##` / `###` 列出标题树，点击即可跳到正文对应位置。
+
+「打开文件夹」之后，目录 tab 列出这个目录里的 Markdown 和文本：
 
 - 显示空文件夹，方便先建目录再写文档
 - 点击文件夹展开 / 折叠，点击文件打开
@@ -264,7 +266,7 @@ Windows 下 `Ctrl` 对应 macOS 的 `Command`（源码里按 `CmdOrCtrl` 绑定�
 | 编辑 | 撤销 / 重做、剪切 / 复制 / 粘贴 / 删除、全选、格式化代码块 |
 | 视图 | 切换即时渲染 / 源码、显示/隐藏目录栏、重新加载、缩放、全屏 |
 | 主题 | 浅色主题、深色主题 |
-| 帮助 | 关于 MarkL |
+| 帮助 | GitHub 仓库、关于 MarkL |
 
 ## 下载与安装
 
@@ -272,9 +274,9 @@ Windows 下 `Ctrl` 对应 macOS 的 `Command`（源码里按 `CmdOrCtrl` 绑定�
 
 | 文件 | 说明 | 下载 |
 | --- | --- | --- |
-| `MarkL.1.0.0.exe` | 绿色版，打开即可用 | [直链下载](https://github.com/LcodeCoder/markL/releases/download/1.0.1/MarkL.1.0.0.exe) |
+| `MarkL.1.0.2.exe` | 绿色版，打开即可用 | [直链下载](https://github.com/LcodeCoder/markL/releases/download/1.0.2/MarkL.1.0.2.exe) |
 
-发布页：[1.0.1（Latest）](https://github.com/LcodeCoder/markL/releases/tag/1.0.1) · [全部 Release](https://github.com/LcodeCoder/markL/releases)
+发布页：[1.0.2（Latest）](https://github.com/LcodeCoder/markL/releases/tag/1.0.2) · [全部 Release](https://github.com/LcodeCoder/markL/releases)
 
 系统要求：
 

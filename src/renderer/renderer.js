@@ -28,6 +28,8 @@ const VDITOR_CDN = new URL('../../node_modules/vditor', import.meta.url).href;
 const CONTENT_THEME_PATH = new URL('../../node_modules/vditor/dist/css/content-theme', import.meta.url).href;
 const HISTORY_KEY = 'markl-open-history';
 const HISTORY_LIMIT = 16;
+const SIDEBAR_TAB_KEY = 'markl-sidebar-tab';
+const GITHUB_REPO_URL = 'https://github.com/LcodeCoder/markL';
 
 const state = {
   filePath: null,
@@ -37,6 +39,8 @@ const state = {
   workspaceName: null,
   workspaceTree: [],
   expandedPaths: new Set(),
+  outlineCollapsed: new Set(),
+  sidebarTab: 'files',
   popup: { visible: false, query: '', items: [], selected: 0, suppressUntil: 0 },
   treeDraft: null,
   sourceMode: false,
@@ -52,12 +56,18 @@ const elements = {
   saveStatus: document.getElementById('save-status'),
   fileTree: document.getElementById('file-tree'),
   treeEmpty: document.getElementById('tree-empty'),
+  headingTree: document.getElementById('heading-tree'),
+  filesPanel: document.getElementById('files-panel'),
+  outlinePanel: document.getElementById('outline-panel'),
+  tabFiles: document.getElementById('tab-files'),
+  tabOutline: document.getElementById('tab-outline'),
   workspaceHeading: document.getElementById('workspace-heading'),
   workspaceName: document.getElementById('workspace-name'),
   workspacePath: document.getElementById('workspace-path'),
   refreshTreeButton: document.getElementById('refresh-tree-button'),
   newTreeButton: document.getElementById('new-tree-button'),
   sidebar: document.getElementById('sidebar'),
+  githubLink: document.getElementById('github-link'),
   languagePopup: document.getElementById('language-popup'),
   languageQueryInput: document.getElementById('language-query-input'),
   languageList: document.getElementById('language-list'),
@@ -296,6 +306,7 @@ function recomputeDirty() {
     updateTitle();
   }
   updateCounts();
+  scheduleOutlineRefresh();
 }
 
 function loadContent(filePath, content) {
@@ -304,6 +315,7 @@ function loadContent(filePath, content) {
   setMarkdown(normalized, true);
   markClean(normalized);
   updateCounts();
+  renderHeadingTree();
   if (filePath) rememberOpen('file', filePath);
   focusEditor();
 }
@@ -326,6 +338,7 @@ async function doNew() {
   setMarkdown('', true);
   markClean('');
   updateCounts();
+  renderHeadingTree();
   focusEditor();
 }
 
@@ -582,6 +595,224 @@ function updateActiveTreeItem() {
   });
 }
 
+function cleanHeadingText(text) {
+  return String(text || '')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/[*_~]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseHeadingOutline(markdown) {
+  const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
+  const items = [];
+  const seen = new Map();
+  let inFence = false;
+  let fenceChar = '';
+  let start = 0;
+
+  if (lines[0]?.trim() === '---') {
+    const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
+    if (end > 0) start = end + 1;
+  }
+
+  for (let index = start; index < lines.length; index += 1) {
+    const line = lines[index];
+    const fence = line.match(/^(`{3,}|~{3,})/);
+    if (fence) {
+      const mark = fence[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = mark;
+      } else if (mark === fenceChar) {
+        inFence = false;
+        fenceChar = '';
+      }
+      continue;
+    }
+    if (inFence) continue;
+
+    const atx = line.match(/^(#{1,6})\s+(.+?)\s*$/);
+    if (atx) {
+      const text = cleanHeadingText(atx[2].replace(/\s+#+\s*$/, ''));
+      if (!text) continue;
+      const occurrence = seen.get(text) || 0;
+      seen.set(text, occurrence + 1);
+      items.push({ level: atx[1].length, text, line: index, occurrence });
+      continue;
+    }
+
+    const next = lines[index + 1];
+    if (!line.trim() || line.startsWith('    ') || !next) continue;
+    const setext = next.match(/^(=+|-+)\s*$/);
+    if (!setext || /^[-*+]\s/.test(line) || /^\d+\.\s/.test(line)) continue;
+    const text = cleanHeadingText(line);
+    if (!text) continue;
+    const occurrence = seen.get(text) || 0;
+    seen.set(text, occurrence + 1);
+    items.push({ level: setext[1].startsWith('=') ? 1 : 2, text, line: index, occurrence });
+  }
+
+  return items;
+}
+
+function nestHeadingItems(items) {
+  const root = [];
+  const stack = [];
+  items.forEach((item, index) => {
+    const node = { ...item, index, children: [] };
+    while (stack.length && stack[stack.length - 1].level >= node.level) stack.pop();
+    if (stack.length) stack[stack.length - 1].children.push(node);
+    else root.push(node);
+    stack.push(node);
+  });
+  return root;
+}
+
+function outlineKey(node) {
+  return `${node.level}:${node.occurrence}:${node.text}`;
+}
+
+function headingIcon() {
+  return svgNode('<svg class="tree-type-icon is-file" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M2.5 3.75h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Zm0 3.5h8a.75.75 0 0 1 0 1.5h-8a.75.75 0 0 1 0-1.5Zm0 3.5h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Z"/></svg>');
+}
+
+function visibleHeadingText(element) {
+  const clone = element.cloneNode(true);
+  clone.querySelectorAll('.vditor-ir__marker').forEach((node) => node.remove());
+  return cleanHeadingText((clone.textContent || '').replace(/[\u200b\u00a0]/g, ''));
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function jumpToSourceLine(line) {
+  const textarea = elements.sourceEditor;
+  const text = textarea.value || '';
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  let start = 0;
+  for (let index = 0; index < line && index < lines.length; index += 1) {
+    start += lines[index].length + 1;
+  }
+  const end = start + (lines[line]?.length || 0);
+  textarea.focus();
+  textarea.setSelectionRange(start, end);
+  const styles = window.getComputedStyle(textarea);
+  const lineHeight = Number.parseFloat(styles.lineHeight) || 24;
+  textarea.scrollTop = Math.max(0, line * lineHeight - 72);
+}
+
+function jumpToOutlineItem(item) {
+  if (state.sourceMode) {
+    jumpToSourceLine(item.line);
+    return;
+  }
+
+  const nodes = [...document.querySelectorAll('#editor .vditor-reset :is(h1, h2, h3, h4, h5, h6)')];
+  const match = nodes.filter((node) => visibleHeadingText(node) === item.text)[item.occurrence] || nodes[item.index];
+  if (!match) return;
+  match.scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  match.classList.add('outline-flash');
+  window.setTimeout(() => match.classList.remove('outline-flash'), 700);
+}
+
+function createHeadingNode(node, depth = 0) {
+  const item = document.createElement('div');
+  item.className = 'heading-item';
+
+  const hasChildren = node.children.length > 0;
+  const key = outlineKey(node);
+  const expanded = !hasChildren || !state.outlineCollapsed.has(key);
+
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'heading-row';
+  row.style.setProperty('--tree-depth', depth);
+  row.dataset.level = String(node.level);
+  row.dataset.index = String(node.index);
+  row.title = node.text;
+
+  const chevron = document.createElement('span');
+  chevron.className = `tree-chevron${hasChildren ? '' : ' is-leaf'}`;
+  if (hasChildren) {
+    chevron.append(chevronIcon(expanded));
+    row.setAttribute('aria-expanded', String(expanded));
+  }
+
+  const level = document.createElement('span');
+  level.className = 'heading-level';
+  level.textContent = `H${node.level}`;
+
+  const label = document.createElement('span');
+  label.className = 'heading-label';
+  label.textContent = node.text;
+
+  row.append(chevron, headingIcon(), level, label);
+  row.addEventListener('click', (event) => {
+    if (hasChildren && (event.target.closest('.tree-chevron') || event.offsetX < 22)) {
+      if (state.outlineCollapsed.has(key)) state.outlineCollapsed.delete(key);
+      else state.outlineCollapsed.add(key);
+      renderHeadingTree();
+      return;
+    }
+    jumpToOutlineItem(node);
+  });
+  item.appendChild(row);
+
+  if (hasChildren && expanded) {
+    const children = document.createElement('div');
+    children.className = 'tree-children';
+    node.children.forEach((child) => children.appendChild(createHeadingNode(child, depth + 1)));
+    item.appendChild(children);
+  }
+  return item;
+}
+
+function renderHeadingTree() {
+  if (!elements.headingTree) return;
+  const scrollTop = elements.headingTree.scrollTop;
+  const items = parseHeadingOutline(getMarkdown());
+  const known = new Set(items.map((item) => outlineKey(item)));
+  [...state.outlineCollapsed].forEach((key) => {
+    if (!known.has(key)) state.outlineCollapsed.delete(key);
+  });
+
+  elements.headingTree.replaceChildren();
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'tree-empty';
+    empty.innerHTML = '<p>还没有标题结构</p><span>用 # 加空格写出标题后，这里会按层级列出当前文档的结构树。</span>';
+    elements.headingTree.appendChild(empty);
+    return;
+  }
+
+  nestHeadingItems(items).forEach((node) => elements.headingTree.appendChild(createHeadingNode(node)));
+  elements.headingTree.scrollTop = scrollTop;
+}
+
+let outlineTimer = 0;
+
+function scheduleOutlineRefresh() {
+  window.clearTimeout(outlineTimer);
+  outlineTimer = window.setTimeout(renderHeadingTree, 140);
+}
+
+function setSidebarTab(tab) {
+  state.sidebarTab = tab === 'outline' ? 'outline' : 'files';
+  localStorage.setItem(SIDEBAR_TAB_KEY, state.sidebarTab);
+  const files = state.sidebarTab === 'files';
+  elements.filesPanel.classList.toggle('hidden', !files);
+  elements.outlinePanel.classList.toggle('hidden', files);
+  elements.tabFiles.classList.toggle('is-active', files);
+  elements.tabOutline.classList.toggle('is-active', !files);
+  elements.tabFiles.setAttribute('aria-selected', String(files));
+  elements.tabOutline.setAttribute('aria-selected', String(!files));
+  if (!files) renderHeadingTree();
+}
+
 function applyWorkspace(payload) {
   if (!payload) return;
   state.workspaceRoot = payload.rootPath;
@@ -757,6 +988,7 @@ async function handleTreeAction(action, kind, targetPath) {
         setMarkdown('', true);
         markClean('');
         updateCounts();
+        renderHeadingTree();
       }
       forgetOpenTree(targetPath);
       await refreshWorkspace();
@@ -1190,6 +1422,7 @@ function createVditor() {
       watchCodeHighlight();
       focusEditor();
       updateCounts();
+      renderHeadingTree();
     },
     input() {
       recomputeDirty();
@@ -1208,8 +1441,17 @@ document.getElementById('new-tree-button').addEventListener('click', startRootDo
 document.getElementById('new-button').addEventListener('click', doNew);
 elements.fileTree.addEventListener('contextmenu', onTreeContextMenu);
 elements.sidebar.addEventListener('contextmenu', (event) => {
-  if (event.target.closest('#file-tree, #open-history')) return;
+  if (state.sidebarTab !== 'files') return;
+  if (event.target.closest('#file-tree, #open-history, .sidebar-tabs')) return;
   onTreeContextMenu(event);
+});
+elements.tabFiles.addEventListener('click', () => setSidebarTab('files'));
+elements.tabOutline.addEventListener('click', () => setSidebarTab('outline'));
+elements.githubLink.addEventListener('click', (event) => {
+  event.preventDefault();
+  window.markl.openExternal(GITHUB_REPO_URL).catch((error) => {
+    showOperationError('打开 GitHub', error);
+  });
 });
 document.getElementById('open-button').addEventListener('click', doOpen);
 document.getElementById('save-button').addEventListener('click', doSave);
@@ -1299,4 +1541,5 @@ updateTitle();
 updateCounts();
 renderFileTree();
 renderHistory();
+setSidebarTab(localStorage.getItem(SIDEBAR_TAB_KEY) || 'files');
 createVditor();
