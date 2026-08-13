@@ -6,7 +6,7 @@
   "author": "Haiyu Information",
   "license": "MIT",
   "scripts": {
-    "start": "electron .",
+    "start": "node scripts/dev-launch.js",
     "make-icon": "node scripts/make-icon.js",
     "build": "npm run make-icon && electron-builder --win",
     "dist": "npm run make-icon && electron-builder --win portable nsis"
@@ -70,8 +70,7 @@
     "png-to-ico": "^2.1.8"
   },
   "dependencies": {
-    "@toast-ui/editor": "^3.2.2",
-    "@toast-ui/editor-plugin-code-syntax-highlight": "^3.1.0",
-    "prismjs": "^1.30.0"
+    "js-beautify": "^1.15.1",
+    "vditor": "^3.10.9"
   }
 }

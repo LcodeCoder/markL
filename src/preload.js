@@ -9,6 +9,13 @@ contextBridge.exposeInMainWorld('markl', {
 
   writeFile: (options) => ipcRenderer.invoke('file:write', options),
   readFile: (options) => ipcRenderer.invoke('file:read', options),
+  createFile: (options) => ipcRenderer.invoke('file:create', options),
+  createFolder: (options) => ipcRenderer.invoke('file:mkdir', options),
+  renamePath: (options) => ipcRenderer.invoke('file:rename', options),
+  deletePath: (options) => ipcRenderer.invoke('file:delete', options),
+  revealInFolder: (targetPath) => ipcRenderer.invoke('shell:reveal', targetPath),
+  showTreeMenu: (payload) => ipcRenderer.invoke('tree:context-menu', payload),
+  formatCode: (options) => ipcRenderer.invoke('code:format', options),
 
   setTitle: (title) => ipcRenderer.send('app:set-title', title),
   doClose: () => ipcRenderer.send('app:do-close'),
@@ -25,6 +32,7 @@ contextBridge.exposeInMainWorld('markl', {
       'menu:toggle-mode',
       'menu:toggle-sidebar',
       'menu:theme',
+      'menu:format',
       'app:before-close'
     ];
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_event, ...args) => callback(...args));

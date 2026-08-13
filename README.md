@@ -19,10 +19,10 @@ MarkL 是一款使用 Electron 构建的桌面 Markdown 编辑器，整合了文
 
 ## 功能特性
 
-- **Markdown 与所见即所得编辑**：可在 Markdown 源码模式和 WYSIWYG 模式之间快速切换。
-- **实时预览**：基于 Toast UI Editor，在编辑内容时同步查看渲染结果。
+- **即时渲染编辑**：默认 Typora 式单页编辑，可切换到 Markdown 源码。
+- **代码块语言与高亮**：输入三个反引号后回车选择语言，关键字即时高亮。
 - **文件夹工作区**：打开文件夹后，通过左侧目录树浏览 `.md`、`.markdown` 和 `.txt` 文件。
-- **代码语法高亮**：使用 Prism.js 高亮常见编程语言的代码块。
+- **代码语法高亮**：使用 highlight.js 高亮常见编程语言的代码块。
 - **代码语言快捷选择**：输入三个反引号后可筛选语言，并使用方向键、`Enter` 或 `Tab` 完成选择。
 - **完整文件操作**：支持新建、打开、保存、另存为以及未保存内容确认。
 - **导出 HTML**：将当前 Markdown 文档导出为包含基础样式的独立 HTML 文件。
@@ -36,8 +36,8 @@ MarkL 是一款使用 Electron 构建的桌面 Markdown 编辑器，整合了文
 | 技术 | 用途 |
 | --- | --- |
 | [Electron](https://www.electronjs.org/) | Windows 桌面应用运行环境 |
-| [Toast UI Editor](https://ui.toast.com/tui-editor) | Markdown / WYSIWYG 编辑与预览 |
-| [Prism.js](https://prismjs.com/) | 代码语法高亮 |
+| [Vditor](https://b3log.org/vditor) | Typora 式即时渲染 Markdown 编辑 |
+| highlight.js | 代码块语法高亮 |
 | [electron-builder](https://www.electron.build/) | Windows 安装包与便携版构建 |
 | Jimp + png-to-ico | 应用图标生成 |
 

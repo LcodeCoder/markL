@@ -12,6 +12,7 @@ out/
 *.tmp
 *.log
 PixPin_*.png
+image.png
 
 # Electron / tool caches
 .cache/
