@@ -74,7 +74,12 @@ const elements = {
   editorWrap: document.getElementById('editor-wrap'),
   sourceEditor: document.getElementById('source-editor'),
   historyList: document.getElementById('history-list'),
-  clearHistoryButton: document.getElementById('clear-history-button')
+  clearHistoryButton: document.getElementById('clear-history-button'),
+  tableToolbar: document.getElementById('table-toolbar'),
+  tableInsertButton: document.getElementById('table-insert-button'),
+  tableMoreButton: document.getElementById('table-more-button'),
+  tableInsertMenu: document.getElementById('table-insert-menu'),
+  tableMoreMenu: document.getElementById('table-more-menu')
 };
 
 function normalizeMarkdown(content = '') {
@@ -873,6 +878,7 @@ function toggleMode() {
     elements.sourceEditor.classList.remove('hidden');
     elements.modeLabel.textContent = 'Markdown 源码';
     elements.sourceEditor.focus();
+    hideTableToolbar();
   }
   recomputeDirty();
 }
@@ -1343,6 +1349,7 @@ function balanceEditorTables() {
       if (available <= 0) return;
       applyTableColumnWidths(table, fitColumnWidths(preferredColumnWidths(table), available), available);
     });
+    if (tableUi.table?.isConnected) positionTableToolbar(tableUi.table);
   } finally {
     balancingTables = false;
   }
@@ -1356,6 +1363,274 @@ function scheduleTableBalance() {
 function decorateCodeBlocks() {
   scheduleCodeHighlight();
   scheduleTableBalance();
+}
+
+const tableUi = { table: null, cell: null, menu: '' };
+let tableToolbarTimer = 0;
+
+function emptyTableCell(tag, align) {
+  const safeAlign = align || 'left';
+  return `<${tag} align="${safeAlign}">\u200b</${tag}>`;
+}
+
+function getSelectionTableCell() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  let node = selection.anchorNode;
+  if (!node) return null;
+  if (node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement;
+  const cell = node?.closest?.('td, th');
+  if (!cell || !document.getElementById('editor')?.contains(cell)) return null;
+  return cell;
+}
+
+function cellColumnIndex(cell) {
+  return [...cell.parentElement.cells].indexOf(cell);
+}
+
+function columnAlign(cell) {
+  return (cell.getAttribute('align') || (cell.tagName === 'TH' ? 'center' : 'left')).toLowerCase();
+}
+
+function closeTableMenus() {
+  tableUi.menu = '';
+  elements.tableInsertMenu.classList.add('hidden');
+  elements.tableMoreMenu.classList.add('hidden');
+  elements.tableInsertButton.setAttribute('aria-expanded', 'false');
+  elements.tableMoreButton.setAttribute('aria-expanded', 'false');
+}
+
+function hideTableToolbar() {
+  closeTableMenus();
+  tableUi.table = null;
+  tableUi.cell = null;
+  elements.tableToolbar.classList.add('hidden');
+}
+
+function positionTableToolbar(table) {
+  const wrap = elements.editorWrap;
+  const wrapRect = wrap.getBoundingClientRect();
+  const tableRect = table.getBoundingClientRect();
+  if (tableRect.bottom < wrapRect.top + 8 || tableRect.top > wrapRect.bottom - 8) {
+    elements.tableToolbar.classList.add('hidden');
+    return;
+  }
+  const barHeight = elements.tableToolbar.offsetHeight || 32;
+  const top = Math.max(8, tableRect.top - wrapRect.top - barHeight - 4);
+  const left = Math.max(8, tableRect.left - wrapRect.left);
+  const maxWidth = wrapRect.width - left - 8;
+  elements.tableToolbar.style.top = `${top}px`;
+  elements.tableToolbar.style.left = `${left}px`;
+  elements.tableToolbar.style.width = `${Math.min(Math.max(tableRect.width, 228), maxWidth)}px`;
+  elements.tableToolbar.classList.remove('hidden');
+}
+
+function refreshTableToolbarState() {
+  const cell = tableUi.cell;
+  if (!cell) return;
+  const align = columnAlign(cell);
+  elements.tableToolbar.querySelectorAll('[data-table-action^="align-"]').forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.tableAction === `align-${align}`);
+  });
+}
+
+function showTableToolbar(cell) {
+  const table = cell.closest('table');
+  if (!table) return hideTableToolbar();
+  tableUi.table = table;
+  tableUi.cell = cell;
+  positionTableToolbar(table);
+  refreshTableToolbarState();
+}
+
+function scheduleTableToolbar() {
+  window.clearTimeout(tableToolbarTimer);
+  tableToolbarTimer = window.setTimeout(() => {
+    if (state.sourceMode) return hideTableToolbar();
+    if (elements.tableToolbar.contains(document.activeElement)) return;
+    const cell = getSelectionTableCell();
+    if (cell) showTableToolbar(cell);
+    else if (!tableUi.menu) hideTableToolbar();
+  }, 30);
+}
+
+function notifyTableEdit() {
+  const core = vditor?.vditor;
+  if (core) {
+    const text = vditor.getValue();
+    core.options?.input?.(text);
+    core.undo?.addToUndoStack?.(core);
+  } else {
+    recomputeDirty();
+  }
+  scheduleTableBalance();
+}
+
+function focusTableCell(cell) {
+  if (!cell) return;
+  vditor?.vditor?.ir?.element?.focus?.({ preventScroll: true });
+  const range = document.createRange();
+  range.selectNodeContents(cell);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  tableUi.cell = cell;
+  tableUi.table = cell.closest('table');
+}
+
+function currentTableContext() {
+  const cell = tableUi.cell?.isConnected ? tableUi.cell : getSelectionTableCell();
+  const table = cell?.closest('table') || (tableUi.table?.isConnected ? tableUi.table : null);
+  if (!cell || !table) return null;
+  return { cell, table, col: cellColumnIndex(cell), row: cell.parentElement };
+}
+
+function setTableColumnAlign(type) {
+  const ctx = currentTableContext();
+  if (!ctx) return;
+  [...ctx.table.rows].forEach((row) => {
+    const target = row.cells[ctx.col];
+    if (target) target.setAttribute('align', type);
+  });
+  focusTableCell(ctx.table.rows[ctx.row.rowIndex]?.cells[ctx.col] || ctx.cell);
+  refreshTableToolbarState();
+  notifyTableEdit();
+}
+
+function insertTableRow(where) {
+  const ctx = currentTableContext();
+  if (!ctx) return;
+  const html = [...ctx.row.cells].map((cell) => emptyTableCell('td', cell.getAttribute('align') || 'left')).join('');
+  if (where === 'above' && ctx.cell.tagName === 'TH') {
+    const aligns = [...ctx.row.cells].map((cell) => cell.getAttribute('align') || 'center');
+    const oldHeader = ctx.row.innerHTML.replace(/<th/gi, '<td').replace(/<\/th>/gi, '</td>');
+    ctx.row.innerHTML = aligns.map((align) => emptyTableCell('th', align)).join('');
+    const tbody = ctx.table.tBodies[0] || ctx.table.appendChild(document.createElement('tbody'));
+    tbody.insertAdjacentHTML('afterbegin', `<tr>${oldHeader}</tr>`);
+    focusTableCell(ctx.table.rows[0].cells[ctx.col]);
+  } else if (where === 'above') {
+    ctx.row.insertAdjacentHTML('beforebegin', `<tr>${html}</tr>`);
+    focusTableCell(ctx.row.previousElementSibling.cells[ctx.col]);
+  } else if (ctx.cell.tagName === 'TH') {
+    const tbody = ctx.table.tBodies[0] || ctx.table.appendChild(document.createElement('tbody'));
+    tbody.insertAdjacentHTML('afterbegin', `<tr>${html}</tr>`);
+    focusTableCell(tbody.rows[0].cells[ctx.col]);
+  } else {
+    ctx.row.insertAdjacentHTML('afterend', `<tr>${html}</tr>`);
+    focusTableCell(ctx.row.nextElementSibling.cells[ctx.col]);
+  }
+  notifyTableEdit();
+  showTableToolbar(tableUi.cell);
+}
+
+function insertTableColumn(where) {
+  const ctx = currentTableContext();
+  if (!ctx) return;
+  const index = where === 'left' ? ctx.col : ctx.col + 1;
+  [...ctx.table.rows].forEach((row, rowIndex) => {
+    const tag = rowIndex === 0 ? 'th' : 'td';
+    const align = row.cells[ctx.col]?.getAttribute('align') || (tag === 'th' ? 'center' : 'left');
+    const html = emptyTableCell(tag, align);
+    if (index >= row.cells.length) row.insertAdjacentHTML('beforeend', html);
+    else row.cells[index].insertAdjacentHTML('beforebegin', html);
+  });
+  const nextIndex = where === 'left' ? ctx.col : ctx.col + 1;
+  focusTableCell(ctx.table.rows[ctx.row.rowIndex].cells[nextIndex]);
+  notifyTableEdit();
+  showTableToolbar(tableUi.cell);
+}
+
+function deleteTableRow() {
+  const ctx = currentTableContext();
+  if (!ctx) return;
+  if (ctx.table.rows.length <= 1) {
+    deleteWholeTable();
+    return;
+  }
+  if (ctx.cell.tagName === 'TH') {
+    const bodyRow = ctx.table.tBodies[0]?.rows[0];
+    if (!bodyRow) {
+      deleteWholeTable();
+      return;
+    }
+    ctx.row.innerHTML = [...bodyRow.cells].map((cell) => {
+      const align = cell.getAttribute('align') || 'center';
+      return `<th align="${align}">${cell.innerHTML}</th>`;
+    }).join('');
+    bodyRow.remove();
+    if (ctx.table.tBodies[0] && !ctx.table.tBodies[0].rows.length) ctx.table.tBodies[0].remove();
+    focusTableCell(ctx.table.rows[0].cells[Math.min(ctx.col, ctx.table.rows[0].cells.length - 1)]);
+  } else {
+    const fallback = ctx.row.previousElementSibling || ctx.row.nextElementSibling || ctx.table.rows[0];
+    const parent = ctx.row.parentElement;
+    ctx.row.remove();
+    if (parent.tagName === 'TBODY' && !parent.rows.length) parent.remove();
+    focusTableCell(fallback.cells[Math.min(ctx.col, fallback.cells.length - 1)]);
+  }
+  notifyTableEdit();
+  if (tableUi.cell) showTableToolbar(tableUi.cell);
+}
+
+function deleteTableColumn() {
+  const ctx = currentTableContext();
+  if (!ctx) return;
+  if (ctx.table.rows[0].cells.length <= 1) {
+    deleteWholeTable();
+    return;
+  }
+  const nextIndex = Math.max(0, ctx.col - 1);
+  [...ctx.table.rows].forEach((row) => row.cells[ctx.col]?.remove());
+  const rowIndex = Math.min(ctx.row.rowIndex, ctx.table.rows.length - 1);
+  focusTableCell(ctx.table.rows[rowIndex].cells[nextIndex]);
+  notifyTableEdit();
+  if (tableUi.cell) showTableToolbar(tableUi.cell);
+}
+
+function deleteWholeTable() {
+  const ctx = currentTableContext();
+  if (!ctx) return;
+  ctx.table.insertAdjacentHTML('afterend', '<p data-block="0">\n</p>');
+  const next = ctx.table.nextElementSibling;
+  ctx.table.remove();
+  hideTableToolbar();
+  if (next) {
+    const range = document.createRange();
+    range.selectNodeContents(next);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  notifyTableEdit();
+}
+
+function toggleTableMenu(name) {
+  const opening = tableUi.menu !== name;
+  closeTableMenus();
+  if (!opening) return;
+  tableUi.menu = name;
+  const menu = name === 'insert' ? elements.tableInsertMenu : elements.tableMoreMenu;
+  const button = name === 'insert' ? elements.tableInsertButton : elements.tableMoreButton;
+  menu.classList.remove('hidden');
+  button.setAttribute('aria-expanded', 'true');
+}
+
+function handleTableToolbarAction(action) {
+  if (!action) return;
+  if (action === 'toggle-insert') return toggleTableMenu('insert');
+  if (action === 'toggle-more') return toggleTableMenu('more');
+  closeTableMenus();
+  if (action === 'align-left') return setTableColumnAlign('left');
+  if (action === 'align-center') return setTableColumnAlign('center');
+  if (action === 'align-right') return setTableColumnAlign('right');
+  if (action === 'insert-row-above') return insertTableRow('above');
+  if (action === 'insert-row-below') return insertTableRow('below');
+  if (action === 'insert-col-left') return insertTableColumn('left');
+  if (action === 'insert-col-right') return insertTableColumn('right');
+  if (action === 'delete-row') return deleteTableRow();
+  if (action === 'delete-column') return deleteTableColumn();
+  if (action === 'delete-table') return deleteWholeTable();
 }
 
 function watchCodeHighlight() {
@@ -1539,6 +1814,7 @@ function createVditor() {
       else markClean(getMarkdown());
       decorateCodeBlocks();
       watchCodeHighlight();
+      scheduleTableToolbar();
       focusEditor();
       updateCounts();
       renderHeadingTree();
@@ -1588,6 +1864,12 @@ elements.languageQueryInput.addEventListener('input', () => {
 elements.languageQueryInput.addEventListener('keydown', (event) => {
   handlePopupKeydown(event);
 });
+document.getElementById('editor').addEventListener('click', (event) => {
+  const cell = event.target.closest('td, th');
+  if (cell) showTableToolbar(cell);
+  else if (!event.target.closest('.table-toolbar')) hideTableToolbar();
+});
+
 document.getElementById('editor').addEventListener('keyup', (event) => {
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing || state.sourceMode || state.popup.visible) return;
   if (performance.now() < (state.popup.suppressUntil || 0)) return;
@@ -1600,13 +1882,29 @@ document.getElementById('editor').addEventListener('keyup', (event) => {
 document.addEventListener('selectionchange', () => {
   if (state.sourceMode) return;
   scheduleCodeHighlight();
+  scheduleTableToolbar();
 });
 
-elements.editorWrap.addEventListener('scroll', updateLiveHighlight, true);
+elements.editorWrap.addEventListener('scroll', () => {
+  updateLiveHighlight();
+  if (tableUi.table?.isConnected) positionTableToolbar(tableUi.table);
+  else scheduleTableToolbar();
+}, true);
 
 elements.editorWrap.addEventListener('mousedown', (event) => {
-  if (event.target.closest('.language-popup, .vditor-ir, textarea, button, input')) return;
+  if (event.target.closest('.language-popup, .table-toolbar, .vditor-ir, textarea, button, input')) return;
   focusEditor();
+});
+
+elements.tableToolbar.addEventListener('mousedown', (event) => {
+  event.preventDefault();
+});
+
+elements.tableToolbar.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-table-action]');
+  if (!button) return;
+  event.preventDefault();
+  handleTableToolbarAction(button.dataset.tableAction);
 });
 
 window.markl.on('file:opened', async ({ filePath, content }) => {
@@ -1626,9 +1924,10 @@ window.markl.on('app:before-close', async () => {
   if (await confirmDiscardIfDirty()) window.markl.doClose();
 });
 
-document.addEventListener('click', () => {
+document.addEventListener('click', (event) => {
   if (state.sourceMode) return;
   scheduleCodeHighlight();
+  if (!event.target.closest('.table-toolbar')) closeTableMenus();
 });
 
 document.addEventListener('keydown', (event) => {
@@ -1641,12 +1940,17 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     formatActiveCode();
   }
+  if (event.key === 'Escape' && tableUi.menu) {
+    event.preventDefault();
+    closeTableMenus();
+  }
 });
 
 window.addEventListener('resize', () => {
   if (window.matchMedia('(min-width: 821px)').matches) document.body.classList.remove('sidebar-open');
   if (state.popup.visible) positionLanguagePopup();
   scheduleTableBalance();
+  if (tableUi.table?.isConnected) positionTableToolbar(tableUi.table);
 });
 
 elements.clearHistoryButton.addEventListener('click', () => {
