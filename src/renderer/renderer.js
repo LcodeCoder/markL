@@ -415,7 +415,7 @@ async function doExportHtml() {
 body{max-width:760px;margin:48px auto;padding:0 24px 80px;font-family:"Microsoft YaHei UI","PingFang SC",sans-serif;line-height:1.8;color:#1a1f27;overflow-wrap:anywhere}
 pre{background:#eef1f5;padding:16px 16px 28px;border-radius:8px;overflow:auto;position:relative}code{font-family:"Cascadia Code",Consolas,monospace}pre code{background:none;padding:0}
 blockquote{color:#5c6674;border-left:3px solid #d5dbe3;margin-left:0;padding-left:16px}
-table{border-collapse:collapse}th,td{border:1px solid #d5dbe3;padding:7px 12px}img{max-width:100%}center{text-align:center}
+table{width:max-content;max-width:100%;table-layout:auto;border-collapse:collapse;word-break:break-word}th,td{border:1px solid #d5dbe3;padding:7px 12px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;vertical-align:top}img{max-width:100%}center{text-align:center}
 </style>
 </head>
 <body>
@@ -1047,6 +1047,7 @@ function toggleSidebar(force) {
     const hidden = typeof force === 'boolean' ? !force : !document.body.classList.contains('sidebar-hidden');
     document.body.classList.toggle('sidebar-hidden', hidden);
   }
+  scheduleTableBalance();
 }
 
 function filteredLanguages(query) {
@@ -1239,8 +1240,122 @@ function updateLiveHighlight() {
   layer.classList.remove('hidden');
 }
 
+const tableMeasureCanvas = document.createElement('canvas');
+const tableMeasureCtx = tableMeasureCanvas.getContext('2d');
+let tableBalanceTimer = 0;
+let balancingTables = false;
+
+function tableCellText(cell) {
+  let text = '';
+  const walk = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += node.nodeValue;
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    if (node.classList.contains('vditor-ir__marker')) return;
+    if (node.tagName === 'BR') {
+      text += '\n';
+      return;
+    }
+    node.childNodes.forEach(walk);
+  };
+  walk(cell);
+  return text.replace(/[\u200b\u00a0]/g, '');
+}
+
+function tableAvailableWidth(table) {
+  const host = table.parentElement;
+  if (!host) return 0;
+  const style = getComputedStyle(host);
+  return Math.max(0, host.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
+}
+
+function preferredColumnWidths(table) {
+  const rows = [...table.rows];
+  const colCount = rows.reduce((max, row) => Math.max(max, row.cells.length), 0);
+  const widths = Array(colCount).fill(0);
+  rows.forEach((row) => {
+    [...row.cells].forEach((cell, index) => {
+      const style = getComputedStyle(cell);
+      tableMeasureCtx.font = style.font;
+      let textWidth = 0;
+      tableCellText(cell).split('\n').forEach((line) => {
+        textWidth = Math.max(textWidth, tableMeasureCtx.measureText(line).width);
+      });
+      cell.querySelectorAll('img').forEach((img) => {
+        textWidth = Math.max(textWidth, img.naturalWidth || img.width || 0);
+      });
+      const chrome = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+        + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+      widths[index] = Math.max(widths[index], textWidth + chrome);
+    });
+  });
+  return widths;
+}
+
+function fitColumnWidths(preferred, available) {
+  const count = preferred.length;
+  if (!count || available <= 0) return preferred.slice();
+  const minWidth = Math.max(32, Math.min(56, Math.floor(available / Math.max(count * 1.4, 1))));
+  const cappedPref = preferred.map((width) => Math.max(width, minWidth));
+  const sum = cappedPref.reduce((total, width) => total + width, 0);
+  if (sum <= available) return cappedPref;
+  const minSum = minWidth * count;
+  if (minSum >= available) return cappedPref.map(() => available / count);
+  let low = minWidth;
+  let high = Math.max(...cappedPref, available);
+  for (let step = 0; step < 20; step += 1) {
+    const mid = (low + high) / 2;
+    const total = cappedPref.reduce((acc, width) => acc + Math.min(width, mid), 0);
+    if (total > available) high = mid;
+    else low = mid;
+  }
+  return cappedPref.map((width) => Math.min(width, low));
+}
+
+function applyTableColumnWidths(table, widths, available) {
+  const total = widths.reduce((acc, width) => acc + width, 0);
+  const compact = total <= available - 0.5;
+  const nextWidth = compact ? `${Math.ceil(total)}px` : '100%';
+  const signature = `${widths.map((width) => Math.round(width)).join(',')}@${Math.round(available)}`;
+  if (table.dataset.marklCols === signature && table.style.width === nextWidth) return;
+  table.dataset.marklCols = signature;
+  table.dataset.marklBalanced = '1';
+  table.style.width = nextWidth;
+  const first = table.rows[0];
+  if (!first) return;
+  [...first.cells].forEach((cell, index) => {
+    const width = widths[index];
+    if (width == null) return;
+    cell.style.width = compact ? `${width}px` : `${(width / total) * 100}%`;
+  });
+}
+
+function balanceEditorTables() {
+  if (state.sourceMode || balancingTables) return;
+  balancingTables = true;
+  try {
+    document.querySelectorAll('#editor .vditor-reset table').forEach((table) => {
+      if (table.querySelector('[colspan], [rowspan]')) return;
+      if (!table.rows.length) return;
+      const available = tableAvailableWidth(table);
+      if (available <= 0) return;
+      applyTableColumnWidths(table, fitColumnWidths(preferredColumnWidths(table), available), available);
+    });
+  } finally {
+    balancingTables = false;
+  }
+}
+
+function scheduleTableBalance() {
+  window.clearTimeout(tableBalanceTimer);
+  tableBalanceTimer = window.setTimeout(balanceEditorTables, 40);
+}
+
 function decorateCodeBlocks() {
   scheduleCodeHighlight();
+  scheduleTableBalance();
 }
 
 function watchCodeHighlight() {
@@ -1253,9 +1368,13 @@ function watchCodeHighlight() {
     highlightTimer = window.setTimeout(() => {
       highlightCodePreviews();
       updateLiveHighlight();
+      balanceEditorTables();
     }, 90);
   });
   observer.observe(root, { childList: true, subtree: true, characterData: true });
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => scheduleTableBalance()).observe(elements.editorWrap);
+  }
 }
 
 function applyLanguageToActiveBlock(lang) {
@@ -1527,6 +1646,7 @@ document.addEventListener('keydown', (event) => {
 window.addEventListener('resize', () => {
   if (window.matchMedia('(min-width: 821px)').matches) document.body.classList.remove('sidebar-open');
   if (state.popup.visible) positionLanguagePopup();
+  scheduleTableBalance();
 });
 
 elements.clearHistoryButton.addEventListener('click', () => {

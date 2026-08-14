@@ -815,9 +815,26 @@ body.sidebar-hidden #sidebar > * { pointer-events: none; opacity: 0; }
   border-left: 3px solid var(--border-strong) !important;
 }
 .vditor-reset hr { border-color: var(--border) !important; }
-.vditor-reset table,
-.vditor-reset th,
-.vditor-reset td { border-color: var(--border-strong) !important; }
+.vditor-reset table {
+  display: table !important;
+  width: max-content;
+  max-width: 100% !important;
+  table-layout: auto;
+  overflow: visible !important;
+  word-break: break-word !important;
+  border-color: var(--border-strong) !important;
+}
+.vditor-reset table[data-markl-balanced] {
+  table-layout: fixed;
+}
+.vditor-reset table th,
+.vditor-reset table td {
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: top;
+  border-color: var(--border-strong) !important;
+}
 .vditor-reset th { background: var(--code-bg) !important; }
 .vditor-reset center,
 .vditor-ir [data-type="html-block"] center { display: block; text-align: center; }
