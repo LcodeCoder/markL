@@ -27,7 +27,7 @@
       </div>
 
       <div id="files-panel" class="sidebar-panel" role="tabpanel" aria-labelledby="tab-files">
-        <div class="sidebar-actions">
+        <div class="sidebar-actions" id="sidebar-actions">
           <button id="open-folder-button" class="primary-button" type="button" title="选择一个包含 Markdown 文档的文件夹">
             打开文件夹
           </button>
@@ -50,9 +50,11 @@
           </div>
         </nav>
 
-        <section id="open-history" class="open-history" aria-label="打开历史">
+        <section id="open-history" class="open-history is-collapsed" aria-label="打开历史">
           <div class="history-heading">
-            <span>打开历史</span>
+            <button id="history-toggle" class="history-toggle" type="button" aria-expanded="false" aria-controls="history-list">
+              打开历史
+            </button>
             <button id="clear-history-button" class="history-clear hidden" type="button" title="清空打开历史">清空</button>
           </div>
           <div id="history-list" class="history-list"></div>
@@ -89,9 +91,6 @@
           <button id="open-button" class="text-button" type="button" title="打开文件（Ctrl+O）">打开</button>
           <button id="save-button" class="accent-button" type="button" title="保存（Ctrl+S）">保存</button>
           <button id="check-update-button" class="text-button update-button" type="button" title="检查是否有新版本">检查更新</button>
-          <a id="github-link" class="icon-button github-link" href="https://github.com/LcodeCoder/markL" target="_blank" rel="noreferrer" title="在 GitHub 上打开 MarkL" aria-label="在 GitHub 上打开 MarkL">
-            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-          </a>
         </div>
       </header>
 
@@ -103,13 +102,13 @@
             <button id="table-insert-button" type="button" data-table-action="toggle-insert" title="选择表格大小" aria-label="选择表格大小" aria-haspopup="dialog" aria-expanded="false">
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3.25 2A1.25 1.25 0 0 0 2 3.25v9.5A1.25 1.25 0 0 0 3.25 14h9.5A1.25 1.25 0 0 0 14 12.75v-9.5A1.25 1.25 0 0 0 12.75 2h-9.5ZM3.5 6.5h3v3h-3v-3Zm4.5 0h4.5v3H8v-3Zm-4.5 4.5h3v2.5H3.75a.25.25 0 0 1-.25-.25V11Zm4.5 0h4.5v2.25a.25.25 0 0 1-.25.25H8V11ZM6.5 3.5v1.5h-3V3.75c0-.138.112-.25.25-.25H6.5Zm1.5 0h4.25c.138 0 .25.112.25.25V5H8V3.5Z"/></svg>
             </button>
-            <button type="button" data-table-action="align-left" title="当前单元格居左" aria-label="当前单元格居左">
+            <button type="button" data-table-action="align-left" title="当前列居左" aria-label="当前列居左">
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M2.25 3.15h11.5v1.2H2.25zm0 4.25h8.2v1.2h-8.2zm0 4.25h11.5v1.2H2.25z"/></svg>
             </button>
-            <button type="button" data-table-action="align-center" title="当前单元格居中" aria-label="当前单元格居中">
+            <button type="button" data-table-action="align-center" title="当前列居中" aria-label="当前列居中">
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M2.25 3.15h11.5v1.2H2.25zm2.15 4.25h7.2v1.2h-7.2zM2.25 11.65h11.5v1.2H2.25z"/></svg>
             </button>
-            <button type="button" data-table-action="align-right" title="当前单元格居右" aria-label="当前单元格居右">
+            <button type="button" data-table-action="align-right" title="当前列居右" aria-label="当前列居右">
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M2.25 3.15h11.5v1.2H2.25zm3.3 4.25h8.2v1.2h-8.2zM2.25 11.65h11.5v1.2H2.25z"/></svg>
             </button>
           </div>
@@ -162,6 +161,38 @@
             <button id="replace-all" class="find-text-button" type="button" title="全部替换">全部替换</button>
           </div>
         </div>
+        <div id="update-panel" class="update-panel hidden" role="dialog" aria-labelledby="update-title" aria-describedby="update-lead">
+          <div class="update-head">
+            <img src="../../assets/logo-mark.png" alt="" width="18" height="18" />
+            <h2 id="update-title">检查更新</h2>
+            <button id="update-close" class="update-icon-btn" type="button" title="关闭" aria-label="关闭">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="m4.2 3.2 3.8 3.8 3.8-3.8.9.9L8.9 8l3.8 3.8-.9.9L8 8.9l-3.8 3.8-.9-.9L7.1 8 3.3 4.2z"/></svg>
+            </button>
+          </div>
+          <div class="update-body">
+            <p id="update-lead" class="update-lead" aria-live="polite">正在查看新版本</p>
+            <p id="update-versions" class="update-versions hidden">
+              <span id="update-current"></span>
+              <span class="update-arrow" aria-hidden="true">→</span>
+              <span id="update-latest"></span>
+            </p>
+            <p id="update-meta" class="update-meta hidden"></p>
+            <ul id="update-notes" class="update-notes hidden"></ul>
+            <p id="update-error" class="update-error hidden"></p>
+          </div>
+          <div id="update-actions" class="update-actions">
+            <button id="update-download" class="update-download hidden" type="button">下载绿色版</button>
+            <button id="update-setup" class="text-button hidden" type="button">下载安装版</button>
+            <button id="update-retry" class="text-button hidden" type="button">再试一次</button>
+            <button id="update-later" class="text-button hidden" type="button">稍后</button>
+            <button id="update-ok" class="text-button hidden" type="button">确定</button>
+            <button id="update-release" class="update-link hidden" type="button">GitHub Release</button>
+          </div>
+        </div>
+        <div id="quick-open" class="quick-open hidden" role="dialog" aria-label="快速打开">
+          <input id="quick-open-input" class="quick-open-input" type="text" placeholder="打开工作区里的文档" autocomplete="off" spellcheck="false" />
+          <div id="quick-open-list" class="quick-open-list" role="listbox" aria-label="匹配的文档"></div>
+        </div>
         <div id="drop-mask" class="drop-mask" aria-hidden="true">将图片放到文档中</div>
       </section>
 
@@ -177,6 +208,18 @@
         </div>
       </footer>
     </main>
+  </div>
+
+  <div id="app-dialog" class="app-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title">
+    <div class="app-dialog-backdrop" id="app-dialog-backdrop"></div>
+    <div class="app-dialog-card">
+      <h2 id="app-dialog-title">提示</h2>
+      <p id="app-dialog-body" class="app-dialog-body"></p>
+      <div class="app-dialog-actions">
+        <button type="button" id="app-dialog-cancel" class="text-button">取消</button>
+        <button type="button" id="app-dialog-ok" class="app-dialog-ok">确定</button>
+      </div>
+    </div>
   </div>
 
   <script src="../../node_modules/vditor/dist/js/highlight.js/highlight.min.js"></script>

@@ -183,7 +183,7 @@ function createWindow() {
 
   mainWindow.webContents.once('did-finish-load', () => {
     setTimeout(() => {
-      checkForUpdate({ silent: true }).catch(() => {});
+      notifySilentUpdate().catch(() => {});
     }, 2500);
   });
 
@@ -199,6 +199,10 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
+    closeWatcher(workspaceWatcher);
+    closeWatcher(fileWatcher);
+    workspaceWatcher = null;
+    fileWatcher = null;
     mainWindow = null;
   });
 
@@ -260,6 +264,53 @@ function writeDismissedVersion(version) {
   fs.writeFileSync(updateStatePath(), JSON.stringify({ dismissed: version, at: Date.now() }), 'utf8');
 }
 
+function formatAssetSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${Math.round(size / (1024 * 1024))} MB`;
+}
+
+function pickReleaseAsset(assets, kind) {
+  const list = Array.isArray(assets) ? assets : [];
+  const match = list.find((asset) => {
+    const name = String(asset?.name || '');
+    if (!/\.exe$/i.test(name)) return false;
+    const isSetup = /setup/i.test(name);
+    return kind === 'setup' ? isSetup : !isSetup;
+  });
+  const url = match?.browser_download_url;
+  if (!match || !/^https:\/\//i.test(url || '')) return null;
+  return {
+    name: match.name,
+    url,
+    size: formatAssetSize(match.size)
+  };
+}
+
+function sanitizeReleaseNotes(raw) {
+  return String(raw || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .split('\n')
+    .map((line) => line
+      .replace(/^#{1,6}\s+/, '')
+      .replace(/^\s*[-*+]\s+/, '')
+      .replace(/^\s*\d+\.\s+/, '')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .trim())
+    .filter((line) => (
+      line
+      && !/^<!/.test(line)
+      && !/^[-_|:\s]+$/.test(line)
+      && !/^\|.*\|$/.test(line)
+      && !/^\d+(\.\d+)+$/.test(line)
+    ))
+    .slice(0, 8);
+}
+
 function fetchLatestRelease() {
   return new Promise((resolve, reject) => {
     const request = net.request({ method: 'GET', url: RELEASES_API });
@@ -295,7 +346,11 @@ function fetchLatestRelease() {
           }
           resolve({
             latest,
-            url: /^https:\/\//i.test(data.html_url) ? data.html_url : RELEASES_PAGE
+            url: /^https:\/\//i.test(data.html_url) ? data.html_url : RELEASES_PAGE,
+            publishedAt: data.published_at || data.created_at || '',
+            notes: sanitizeReleaseNotes(data.body),
+            portable: pickReleaseAsset(data.assets, 'portable'),
+            setup: pickReleaseAsset(data.assets, 'setup')
           });
         } catch {
           reject(new Error('更新信息无法解析。'));
@@ -310,60 +365,61 @@ function fetchLatestRelease() {
   });
 }
 
-let updateCheckInFlight = false;
+let updateCheckPromise = null;
 
-async function checkForUpdate({ silent = false } = {}) {
-  if (!mainWindow || mainWindow.isDestroyed() || updateCheckInFlight) return;
-  updateCheckInFlight = true;
+async function inspectLatestRelease() {
+  const current = app.getVersion();
+  const release = await fetchLatestRelease();
+  return {
+    current,
+    latest: release.latest,
+    newer: compareVersions(release.latest, current) > 0,
+    url: release.url,
+    publishedAt: release.publishedAt,
+    notes: release.notes,
+    portable: release.portable,
+    setup: release.setup
+  };
+}
+
+async function runUpdateCheck({ silent = false } = {}) {
   try {
-    const current = app.getVersion();
-    const { latest, url } = await fetchLatestRelease();
-    const newer = compareVersions(latest, current) > 0;
-
-    if (silent && (!newer || readDismissedVersion() === latest)) return;
-
-    if (!newer) {
-      if (!silent) {
-        await dialog.showMessageBox(mainWindow, {
-          type: 'info',
-          title: '检查更新',
-          message: '已是最新版本',
-          detail: `当前版本 ${current}。`,
-          buttons: ['确定']
-        });
-        focusMainWindow();
-      }
-      return;
+    const info = await inspectLatestRelease();
+    if (!info.newer) return { status: 'latest', ...info };
+    if (silent && readDismissedVersion() === info.latest) {
+      return { status: 'dismissed', ...info };
     }
-
-    const result = await dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: '发现新版本',
-      message: `MarkL ${latest} 已发布`,
-      detail: `当前版本 ${current}。\n打开下载页获取新版本？`,
-      buttons: ['打开下载页', '稍后'],
-      defaultId: 0,
-      cancelId: 1
-    });
-    focusMainWindow();
-    if (result.response === 0) {
-      await shell.openExternal(url);
-    } else {
-      writeDismissedVersion(latest);
-    }
+    return { status: 'available', ...info };
   } catch (error) {
-    if (silent) return;
-    await dialog.showMessageBox(mainWindow, {
-      type: 'warning',
-      title: '检查更新',
-      message: '暂时无法检查更新',
-      detail: error?.message || String(error),
-      buttons: ['确定']
-    });
-    focusMainWindow();
-  } finally {
-    updateCheckInFlight = false;
+    return {
+      status: 'error',
+      current: app.getVersion(),
+      message: error?.message || String(error)
+    };
   }
+}
+
+function checkForUpdate({ silent = false } = {}) {
+  if (!updateCheckPromise) {
+    updateCheckPromise = runUpdateCheck({ silent }).finally(() => {
+      updateCheckPromise = null;
+    });
+    return updateCheckPromise;
+  }
+  return updateCheckPromise.then((result) => {
+    if (silent) return result;
+    if (result.status === 'dismissed' && result.newer) {
+      return { ...result, status: 'available' };
+    }
+    return result;
+  });
+}
+
+async function notifySilentUpdate() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const result = await checkForUpdate({ silent: true });
+  if (result.status !== 'available' || !mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('update:available', result);
 }
 
 function buildDirectoryTree(rootPath) {
@@ -415,6 +471,132 @@ function workspacePayload(rootPath) {
   };
 }
 
+const ownWrites = new Map();
+let workspaceWatcher = null;
+let fileWatcher = null;
+let watchWorkspaceRoot = null;
+let watchFilePath = null;
+let fsNotifyTimer = 0;
+const pendingFsPaths = new Set();
+
+function noteOwnWrite(targetPath) {
+  if (!targetPath) return;
+  ownWrites.set(path.resolve(targetPath).toLowerCase(), Date.now());
+}
+
+function isOwnWrite(targetPath) {
+  if (!targetPath) return false;
+  const key = path.resolve(targetPath).toLowerCase();
+  const at = ownWrites.get(key);
+  if (!at) return false;
+  if (Date.now() - at < 2000) return true;
+  ownWrites.delete(key);
+  return false;
+}
+
+function shouldIgnoreWatchName(relativeName) {
+  const parts = String(relativeName || '').split(/[\\/]/);
+  return parts.some((part) => !part || part.startsWith('.') || IGNORED_DIRECTORIES.has(part));
+}
+
+function flushFsNotify() {
+  fsNotifyTimer = 0;
+  if (!mainWindow || mainWindow.isDestroyed() || !pendingFsPaths.size) {
+    pendingFsPaths.clear();
+    return;
+  }
+  const paths = [...pendingFsPaths];
+  pendingFsPaths.clear();
+  const visible = paths.filter((item) => !isOwnWrite(item));
+  if (!visible.length) return;
+  mainWindow.webContents.send('fs:change', { paths: visible });
+}
+
+function queueFsNotify(targetPath) {
+  if (!targetPath || isOwnWrite(targetPath)) return;
+  pendingFsPaths.add(path.resolve(targetPath));
+  if (fsNotifyTimer) clearTimeout(fsNotifyTimer);
+  fsNotifyTimer = setTimeout(flushFsNotify, 180);
+}
+
+function closeWatcher(watcher) {
+  try {
+    watcher?.close();
+  } catch {
+    // 监视器关闭失败时忽略。
+  }
+}
+
+function startWorkspaceWatch(rootPath) {
+  closeWatcher(workspaceWatcher);
+  workspaceWatcher = null;
+  watchWorkspaceRoot = rootPath || null;
+  if (!rootPath || !fs.existsSync(rootPath)) return;
+  try {
+    workspaceWatcher = fs.watch(rootPath, { persistent: true, recursive: true }, (_event, filename) => {
+      if (filename && shouldIgnoreWatchName(filename)) return;
+      queueFsNotify(filename ? path.join(rootPath, filename) : rootPath);
+    });
+    workspaceWatcher.on('error', () => {});
+  } catch {
+    workspaceWatcher = null;
+  }
+}
+
+function startFileWatch(filePath) {
+  closeWatcher(fileWatcher);
+  fileWatcher = null;
+  watchFilePath = filePath || null;
+  if (!filePath || !fs.existsSync(filePath)) return;
+  if (watchWorkspaceRoot && isPathInsideWatch(filePath, watchWorkspaceRoot)) return;
+  try {
+    fileWatcher = fs.watch(filePath, { persistent: true }, () => {
+      queueFsNotify(filePath);
+    });
+    fileWatcher.on('error', () => {});
+  } catch {
+    fileWatcher = null;
+  }
+}
+
+function isPathInsideWatch(filePath, rootPath) {
+  const file = path.resolve(filePath).toLowerCase();
+  const root = path.resolve(rootPath).toLowerCase();
+  return file === root || file.startsWith(`${root}${path.sep}`);
+}
+
+function draftFilePath() {
+  return path.join(app.getPath('userData'), 'crash-draft.json');
+}
+
+function readCrashDraft() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(draftFilePath(), 'utf8'));
+    if (!parsed || typeof parsed.content !== 'string') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCrashDraft(payload) {
+  fs.writeFileSync(draftFilePath(), JSON.stringify({
+    filePath: payload?.filePath || null,
+    workspaceRoot: payload?.workspaceRoot || null,
+    content: String(payload?.content || ''),
+    savedContent: String(payload?.savedContent || ''),
+    at: Date.now()
+  }), 'utf8');
+}
+
+function clearCrashDraft() {
+  try {
+    fs.unlinkSync(draftFilePath());
+  } catch {
+    // 没有草稿就算了。
+  }
+}
+
 function buildMenu() {
   const send = (channel) => () => mainWindow?.webContents.send(channel);
   const template = [
@@ -424,6 +606,7 @@ function buildMenu() {
         { label: '新建文档', accelerator: 'CmdOrCtrl+N', click: send('menu:new') },
         { label: '打开文件…', accelerator: 'CmdOrCtrl+O', click: send('menu:open') },
         { label: '打开文件夹…', accelerator: 'CmdOrCtrl+Shift+O', click: send('menu:open-folder') },
+        { label: '快速打开…', accelerator: 'CmdOrCtrl+P', click: send('menu:quick-open') },
         { type: 'separator' },
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: send('menu:save') },
         { label: '另存为…', accelerator: 'CmdOrCtrl+Shift+S', click: send('menu:save-as') },
@@ -569,7 +752,7 @@ function buildMenu() {
       submenu: [
         {
           label: '检查更新…',
-          click: () => checkForUpdate({ silent: false })
+          click: () => mainWindow?.webContents.send('menu:check-update')
         },
         {
           label: 'GitHub 仓库',
@@ -577,16 +760,7 @@ function buildMenu() {
         },
         {
           label: '关于 MarkL',
-          click: async () => {
-            await dialog.showMessageBox(mainWindow, {
-              type: 'info',
-              title: '关于 MarkL',
-              message: `MarkL ${app.getVersion()}`,
-              detail: '面向中文用户的轻量 Markdown 编辑器。\n支持目录管理、实时预览与代码语法高亮。',
-              buttons: ['确定']
-            });
-            focusMainWindow();
-          }
+          click: () => mainWindow?.webContents.send('menu:about')
         }
       ]
     }
@@ -651,7 +825,9 @@ ipcMain.handle('dialog:export-html', async (_event, { defaultPath }) => {
 });
 
 ipcMain.handle('file:write', async (_event, { filePath, content }) => {
-  fs.writeFileSync(path.resolve(filePath), content, 'utf8');
+  const resolved = path.resolve(filePath);
+  noteOwnWrite(resolved);
+  fs.writeFileSync(resolved, content, 'utf8');
   return true;
 });
 
@@ -696,6 +872,8 @@ ipcMain.handle('image:save', async (_event, { documentPath, name, mime, bytes })
   const assetsDir = path.join(path.dirname(documentFile), 'assets');
   fs.mkdirSync(assetsDir, { recursive: true });
   const dest = uniquePath(assetsDir, ensureImageFileName(name, mime));
+  noteOwnWrite(dest);
+  noteOwnWrite(assetsDir);
   fs.writeFileSync(dest, buffer);
   return {
     filePath: dest,
@@ -745,6 +923,8 @@ ipcMain.handle('image:resolve', async (_event, { documentPath, sources }) => {
   });
 });
 
+ipcMain.handle('app:version', () => app.getVersion());
+
 ipcMain.handle('app:launch-context', async () => {
   const document = launchDocument;
   launchDocument = null;
@@ -761,8 +941,66 @@ ipcMain.handle('path:stat', async (_event, targetPath) => {
   return {
     exists: true,
     path: resolved,
-    kind: stat.isDirectory() ? 'directory' : 'file'
+    kind: stat.isDirectory() ? 'directory' : 'file',
+    mtimeMs: stat.mtimeMs
   };
+});
+
+ipcMain.handle('path:resolve-doc', async (_event, { documentPath, workspaceRoot, href }) => {
+  const raw = String(href || '').trim();
+  if (!raw) return { kind: 'none' };
+  if (raw.startsWith('#')) return { kind: 'heading', hash: raw.slice(1) };
+  if (/^(https?:|mailto:|data:|blob:)/i.test(raw)) return { kind: 'external', url: raw };
+  if (/^file:/i.test(raw)) {
+    try {
+      const absolute = fileURLToPath(raw.split(/[?#]/)[0]);
+      if (fs.existsSync(absolute) && fs.statSync(absolute).isFile() && DOCUMENT_RE.test(absolute)) {
+        return { kind: 'document', path: absolute };
+      }
+    } catch {
+      return { kind: 'none' };
+    }
+    return { kind: 'missing', path: raw };
+  }
+
+  const cleaned = decodeURI(raw.split(/[?#]/)[0]);
+  const baseDir = documentPath
+    ? path.dirname(path.resolve(documentPath))
+    : (workspaceRoot ? path.resolve(workspaceRoot) : null);
+  if (!baseDir) return { kind: 'none' };
+
+  let absolute = path.resolve(baseDir, cleaned);
+  if (!fs.existsSync(absolute) && !path.extname(absolute)) {
+    for (const ext of ['.md', '.markdown', '.txt']) {
+      if (fs.existsSync(`${absolute}${ext}`)) {
+        absolute = `${absolute}${ext}`;
+        break;
+      }
+    }
+  }
+  if (fs.existsSync(absolute) && fs.statSync(absolute).isFile() && DOCUMENT_RE.test(absolute)) {
+    return { kind: 'document', path: absolute };
+  }
+  if (fs.existsSync(absolute)) return { kind: 'other', path: absolute };
+  return { kind: 'missing', path: absolute };
+});
+
+ipcMain.handle('watch:set', async (_event, { workspaceRoot, filePath }) => {
+  startWorkspaceWatch(workspaceRoot || null);
+  startFileWatch(filePath || null);
+  return true;
+});
+
+ipcMain.handle('draft:save', async (_event, payload) => {
+  writeCrashDraft(payload || {});
+  return true;
+});
+
+ipcMain.handle('draft:read', async () => readCrashDraft());
+
+ipcMain.handle('draft:clear', async () => {
+  clearCrashDraft();
+  return true;
 });
 
 const beautify = require('js-beautify');
@@ -833,6 +1071,7 @@ ipcMain.handle('file:create', async (_event, { dirPath, name, content }) => {
   let fileName = sanitizeEntryName(name || '未命名.md');
   if (!DOCUMENT_RE.test(fileName)) fileName += '.md';
   const dest = uniquePath(directory, fileName);
+  noteOwnWrite(dest);
   fs.writeFileSync(dest, content ?? '', 'utf8');
   return readDocument(dest);
 });
@@ -843,6 +1082,7 @@ ipcMain.handle('file:mkdir', async (_event, { dirPath, name }) => {
     throw new Error('目标文件夹不存在。');
   }
   const dest = uniquePath(directory, sanitizeEntryName(name || '新建文件夹'));
+  noteOwnWrite(dest);
   fs.mkdirSync(dest);
   return dest;
 });
@@ -858,6 +1098,8 @@ ipcMain.handle('file:rename', async (_event, { oldPath, name }) => {
   if (fs.statSync(source).isFile() && !DOCUMENT_RE.test(dest)) {
     throw new Error('仅支持 Markdown 或文本文件。');
   }
+  noteOwnWrite(source);
+  noteOwnWrite(dest);
   fs.renameSync(source, dest);
   return dest;
 });
@@ -865,6 +1107,7 @@ ipcMain.handle('file:rename', async (_event, { oldPath, name }) => {
 ipcMain.handle('file:delete', async (_event, { targetPath }) => {
   const resolved = assertInsideWorkspace(targetPath);
   if (!fs.existsSync(resolved)) throw new Error('目标不存在。');
+  noteOwnWrite(resolved);
   fs.rmSync(resolved, { recursive: true, force: true });
   return true;
 });
@@ -935,8 +1178,11 @@ ipcMain.on('appearance:set', (_event, payload) => {
   applyNativeAppearance(payload, { persist: true, rebuildMenu: true });
 });
 
-ipcMain.handle('update:check', async () => {
-  await checkForUpdate({ silent: false });
+ipcMain.handle('update:check', async () => checkForUpdate({ silent: false }));
+
+ipcMain.handle('update:dismiss', async (_event, version) => {
+  const value = String(version || '').replace(/^v/i, '').trim();
+  if (value) writeDismissedVersion(value);
   return true;
 });
 

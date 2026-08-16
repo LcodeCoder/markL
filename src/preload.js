@@ -21,7 +21,14 @@ contextBridge.exposeInMainWorld('markl', {
   saveImage: (options) => ipcRenderer.invoke('image:save', options),
   resolveImages: (options) => ipcRenderer.invoke('image:resolve', options),
   getLaunchContext: () => ipcRenderer.invoke('app:launch-context'),
+  getVersion: () => ipcRenderer.invoke('app:version'),
   checkUpdate: () => ipcRenderer.invoke('update:check'),
+  dismissUpdate: (version) => ipcRenderer.invoke('update:dismiss', version),
+  resolveDocumentLink: (options) => ipcRenderer.invoke('path:resolve-doc', options),
+  setWatch: (options) => ipcRenderer.invoke('watch:set', options),
+  saveDraft: (payload) => ipcRenderer.invoke('draft:save', payload),
+  readDraft: () => ipcRenderer.invoke('draft:read'),
+  clearDraft: () => ipcRenderer.invoke('draft:clear'),
 
   setTitle: (title) => ipcRenderer.send('app:set-title', title),
   setAppearance: (payload) => ipcRenderer.send('appearance:set', payload),
@@ -44,6 +51,11 @@ contextBridge.exposeInMainWorld('markl', {
       'menu:format',
       'menu:find',
       'menu:replace',
+      'menu:check-update',
+      'menu:quick-open',
+      'menu:about',
+      'update:available',
+      'fs:change',
       'app:before-close'
     ];
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_event, ...args) => callback(...args));

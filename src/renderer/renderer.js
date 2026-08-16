@@ -39,6 +39,7 @@ const LANGUAGE_ALIASES = {
 const VDITOR_CDN = new URL('../../node_modules/vditor', import.meta.url).href;
 const CONTENT_THEME_PATH = new URL('../../node_modules/vditor/dist/css/content-theme', import.meta.url).href;
 const HISTORY_KEY = 'markl-open-history';
+const HISTORY_OPEN_KEY = 'markl-history-open';
 const HISTORY_LIMIT = 16;
 const SIDEBAR_TAB_KEY = 'markl-sidebar-tab';
 const SESSION_KEY = 'markl-session';
@@ -59,7 +60,6 @@ const FONT_SIZES = {
   large: '18px',
   xlarge: '20px'
 };
-const GITHUB_REPO_URL = 'https://github.com/LcodeCoder/markL';
 const IMAGE_FILE_RE = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
 
 const state = {
@@ -77,7 +77,9 @@ const state = {
   sourceMode: false,
   editorReady: false,
   restoringSession: false,
-  appearance: { theme: 'light', font: 'default', fontSize: 'medium' }
+  appearance: { theme: 'light', font: 'default', fontSize: 'medium' },
+  diskMtime: 0,
+  fileMissing: false
 };
 
 const elements = {
@@ -100,7 +102,16 @@ const elements = {
   refreshTreeButton: document.getElementById('refresh-tree-button'),
   newTreeButton: document.getElementById('new-tree-button'),
   sidebar: document.getElementById('sidebar'),
-  githubLink: document.getElementById('github-link'),
+  sidebarActions: document.getElementById('sidebar-actions'),
+  openFolderButton: document.getElementById('open-folder-button'),
+  openHistory: document.getElementById('open-history'),
+  historyToggle: document.getElementById('history-toggle'),
+  appDialog: document.getElementById('app-dialog'),
+  appDialogBackdrop: document.getElementById('app-dialog-backdrop'),
+  appDialogTitle: document.getElementById('app-dialog-title'),
+  appDialogBody: document.getElementById('app-dialog-body'),
+  appDialogOk: document.getElementById('app-dialog-ok'),
+  appDialogCancel: document.getElementById('app-dialog-cancel'),
   languagePopup: document.getElementById('language-popup'),
   languageQueryInput: document.getElementById('language-query-input'),
   languageList: document.getElementById('language-list'),
@@ -127,7 +138,28 @@ const elements = {
   replaceInput: document.getElementById('replace-input'),
   replaceOne: document.getElementById('replace-one'),
   replaceAll: document.getElementById('replace-all'),
-  dropMask: document.getElementById('drop-mask')
+  dropMask: document.getElementById('drop-mask'),
+  quickOpen: document.getElementById('quick-open'),
+  quickOpenInput: document.getElementById('quick-open-input'),
+  quickOpenList: document.getElementById('quick-open-list'),
+  updatePanel: document.getElementById('update-panel'),
+  updateTitle: document.getElementById('update-title'),
+  updateLead: document.getElementById('update-lead'),
+  updateVersions: document.getElementById('update-versions'),
+  updateCurrent: document.getElementById('update-current'),
+  updateLatest: document.getElementById('update-latest'),
+  updateMeta: document.getElementById('update-meta'),
+  updateNotes: document.getElementById('update-notes'),
+  updateError: document.getElementById('update-error'),
+  updateDownload: document.getElementById('update-download'),
+  updateSetup: document.getElementById('update-setup'),
+  updateRetry: document.getElementById('update-retry'),
+  updateLater: document.getElementById('update-later'),
+  updateOk: document.getElementById('update-ok'),
+  updateRelease: document.getElementById('update-release'),
+  updateActions: document.getElementById('update-actions'),
+  updateClose: document.getElementById('update-close'),
+  checkUpdateButton: document.getElementById('check-update-button')
 };
 
 function normalizeMarkdown(content = '') {
@@ -192,7 +224,7 @@ function isHiddenVisual(el) {
 
 function isUnusableCaretHost(el) {
   if (!el) return true;
-  if (el.closest('.markl-live-hl, .language-popup, .table-toolbar, .find-bar, #source-editor')) return true;
+  if (el.closest('.markl-live-hl, .language-popup, .table-toolbar, .find-bar, .update-panel, #quick-open, #app-dialog, #source-editor')) return true;
   if (el.closest('.vditor-ir__preview')) return true;
   if (el.closest('[data-type$="-open-marker"], [data-type$="-close-marker"]')) return true;
   const ir = getIrElement();
@@ -314,9 +346,14 @@ function samePath(left, right) {
   return String(left || '').replace(/\\/g, '/').toLowerCase() === String(right || '').replace(/\\/g, '/').toLowerCase();
 }
 
+function parentFolderName(filePath) {
+  const parts = String(filePath || '').split(/[\\/]/).filter(Boolean);
+  parts.pop();
+  return parts.pop() || '';
+}
+
 function parentDisplay(filePath) {
-  const parent = directoryName(filePath);
-  return parent === '新文档' ? '' : parent;
+  return parentFolderName(filePath);
 }
 
 function readHistory() {
@@ -449,8 +486,10 @@ async function openHistoryItem(item) {
 
 function updateTitle() {
   const name = baseName(state.filePath);
+  const folder = parentFolderName(state.filePath);
   elements.docTitle.textContent = name;
-  elements.docPath.textContent = directoryName(state.filePath);
+  elements.docPath.textContent = state.filePath ? (folder || '本地文件') : '新文档';
+  elements.docPath.title = state.filePath ? (parentDirectory(state.filePath) || state.filePath) : '新文档';
   elements.dirtyDot.classList.toggle('hidden', !state.dirty);
   elements.saveStatus.textContent = state.dirty ? '尚未保存' : '已保存';
   elements.saveStatus.classList.toggle('is-dirty', state.dirty);
@@ -472,17 +511,19 @@ function updateCounts() {
 function markClean(content) {
   state.savedContent = content;
   state.dirty = false;
+  state.fileMissing = false;
   updateTitle();
 }
 
 function recomputeDirty() {
-  const dirty = getMarkdown() !== state.savedContent;
+  const dirty = state.fileMissing || getMarkdown() !== state.savedContent;
   if (dirty !== state.dirty) {
     state.dirty = dirty;
     updateTitle();
   }
   updateCounts();
   scheduleOutlineRefresh();
+  persistDraftSoon();
 }
 
 function loadContent(filePath, content) {
@@ -498,22 +539,71 @@ function loadContent(filePath, content) {
   scheduleImageResolve();
   refreshFindMatches({ stay: true });
   persistSession();
+  rememberDiskStamp(filePath);
+  syncWatch();
   restoreEditorFocus();
+}
+
+let dialogResolver = null;
+
+function isAppDialogOpen() {
+  return Boolean(elements.appDialog && !elements.appDialog.classList.contains('hidden'));
+}
+
+function closeAppDialog(result) {
+  if (!elements.appDialog) return;
+  elements.appDialog.classList.add('hidden');
+  const resolve = dialogResolver;
+  dialogResolver = null;
+  if (resolve) resolve(Boolean(result));
+  requestAnimationFrame(() => {
+    if (!isAppDialogOpen()) restoreEditorFocus();
+  });
+}
+
+function showAppDialog({ title, message, ok = '确定', cancel = '', danger = false } = {}) {
+  return new Promise((resolve) => {
+    if (!elements.appDialog) {
+      resolve(false);
+      return;
+    }
+    if (dialogResolver) closeAppDialog(false);
+    dialogResolver = resolve;
+    elements.appDialogTitle.textContent = title || '提示';
+    elements.appDialogBody.textContent = message || '';
+    elements.appDialogOk.textContent = ok;
+    elements.appDialogOk.classList.toggle('is-danger', Boolean(danger));
+    if (cancel) {
+      elements.appDialogCancel.textContent = cancel;
+      elements.appDialogCancel.classList.remove('hidden');
+    } else {
+      elements.appDialogCancel.classList.add('hidden');
+    }
+    elements.appDialog.classList.remove('hidden');
+    elements.appDialogOk.focus();
+  });
 }
 
 async function confirmDiscardIfDirty() {
   if (!state.dirty) return true;
-  const ok = window.confirm(
-    `“${baseName(state.filePath)}”还有未保存的更改。\n\n确定：放弃更改\n取消：继续编辑`
-  );
-  restoreEditorFocus();
+  const ok = await showAppDialog({
+    title: '未保存的更改',
+    message: `「${baseName(state.filePath)}」还有未保存的更改。放弃后这些修改会丢掉。`,
+    ok: '放弃更改',
+    cancel: '继续编辑',
+    danger: true
+  });
+  if (ok) await window.markl.clearDraft().catch(() => {});
   return ok;
 }
 
 function showOperationError(action, error) {
   console.error(action, error);
-  window.alert(`${action}失败：\n${error?.message || error}`);
-  restoreEditorFocus();
+  return showAppDialog({
+    title: `${action}失败`,
+    message: error?.message || String(error),
+    ok: '知道了'
+  });
 }
 
 async function doNew() {
@@ -526,6 +616,8 @@ async function doNew() {
   updateActiveTreeItem();
   refreshFindMatches({ stay: false });
   persistSession();
+  rememberDiskStamp(null);
+  syncWatch();
   focusEditor();
 }
 
@@ -558,6 +650,8 @@ async function doSave() {
     const content = getMarkdown();
     await window.markl.writeFile({ filePath: state.filePath, content });
     markClean(content);
+    rememberDiskStamp(state.filePath);
+    clearDraftSoon();
     return true;
   } catch (error) {
     showOperationError('保存文件', error);
@@ -577,6 +671,9 @@ async function doSaveAs() {
     if (isPathInside(target, state.workspaceRoot)) await refreshWorkspace();
     scheduleImageResolve();
     persistSession();
+    rememberDiskStamp(target);
+    syncWatch();
+    clearDraftSoon();
     restoreEditorFocus();
     return true;
   } catch (error) {
@@ -597,6 +694,7 @@ async function doExportHtml() {
     if (!target) return;
     const title = baseName(target).replace(/\.html$/i, '');
     const body = getHTML();
+    const contentFont = FONT_STACKS[state.appearance.font] || FONT_STACKS.default;
     const fullHtml = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -604,10 +702,11 @@ async function doExportHtml() {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(title)}</title>
 <style>
-body{max-width:760px;margin:48px auto;padding:0 24px 80px;font-family:"Microsoft YaHei UI","PingFang SC",sans-serif;line-height:1.8;color:#1a1f27;overflow-wrap:anywhere}
+body{max-width:760px;margin:48px auto;padding:0 24px 80px;font-family:${contentFont};line-height:1.8;color:#1a1f27;overflow-wrap:anywhere}
 pre{background:#eef1f5;padding:16px 16px 28px;border-radius:8px;overflow:auto;position:relative}code{font-family:"Cascadia Code",Consolas,monospace}pre code{background:none;padding:0}
 blockquote{color:#5c6674;border-left:3px solid #d5dbe3;margin-left:0;padding-left:16px}
-table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;word-break:break-word}th,td{border:1px solid #d5dbe3;padding:7px 12px;white-space:normal;overflow-wrap:break-word;word-break:break-word;vertical-align:top}img{max-width:100%}center{text-align:center}
+table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;word-break:break-word}th,td{border:1px solid #d5dbe3;padding:7px 12px;white-space:normal;overflow-wrap:break-word;word-break:break-word;vertical-align:top}img{max-width:100%}
+center,font,div,span,p,section,article{font-family:inherit}center{text-align:center}
 </style>
 </head>
 <body>
@@ -900,6 +999,15 @@ function jumpToSourceLine(line) {
   textarea.scrollTop = Math.max(0, line * lineHeight - 72);
 }
 
+let outlineFlashTimer = 0;
+let outlineFlashEl = null;
+
+function clearOutlineFlash() {
+  window.clearTimeout(outlineFlashTimer);
+  outlineFlashEl?.classList.remove('outline-flash');
+  outlineFlashEl = null;
+}
+
 function jumpToOutlineItem(item) {
   if (state.sourceMode) {
     jumpToSourceLine(item.line);
@@ -910,8 +1018,12 @@ function jumpToOutlineItem(item) {
   const match = nodes.filter((node) => visibleHeadingText(node) === item.text)[item.occurrence] || nodes[item.index];
   if (!match) return;
   match.scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  clearOutlineFlash();
+  outlineFlashEl = match;
   match.classList.add('outline-flash');
-  window.setTimeout(() => match.classList.remove('outline-flash'), 700);
+  outlineFlashTimer = window.setTimeout(() => {
+    if (outlineFlashEl === match) clearOutlineFlash();
+  }, 5000);
 }
 
 function createHeadingNode(node, depth = 0) {
@@ -979,7 +1091,7 @@ function renderHeadingTree() {
   if (!items.length) {
     const empty = document.createElement('div');
     empty.className = 'tree-empty';
-    empty.innerHTML = '<p>还没有标题结构</p><span>用 # 加空格写出标题后，这里会按层级列出当前文档的结构树。</span>';
+    empty.innerHTML = '<p>这篇还没有标题</p><span>写一个 # 加空格，结构就会出现在这里。</span>';
     elements.headingTree.appendChild(empty);
     return;
   }
@@ -1024,12 +1136,15 @@ function applyWorkspace(payload, options = {}) {
     );
   }
   elements.workspaceName.textContent = state.workspaceName;
-  elements.workspacePath.textContent = state.workspaceRoot;
+  elements.workspacePath.textContent = state.workspaceName;
+  elements.workspacePath.title = state.workspaceRoot;
   elements.workspaceHeading.classList.remove('hidden');
   elements.refreshTreeButton.classList.remove('hidden');
   elements.newTreeButton.classList.remove('hidden');
+  syncWorkspaceChrome();
   renderFileTree();
   persistSession();
+  syncWatch();
 }
 
 async function doOpenFolder() {
@@ -1183,7 +1298,13 @@ async function handleTreeAction(action, kind, targetPath) {
     const message = kind === 'directory'
       ? `确定删除文件夹“${name}”及其全部内容？此操作无法撤销。`
       : `确定删除“${name}”？此操作无法撤销。`;
-    if (!window.confirm(message)) return;
+    if (!(await showAppDialog({
+      title: '删除',
+      message,
+      ok: '删除',
+      cancel: '取消',
+      danger: true
+    }))) return;
     try {
       await window.markl.deletePath({ targetPath });
       if (state.filePath && isPathInside(state.filePath, targetPath)) {
@@ -1835,7 +1956,10 @@ function cellColumnIndex(cell) {
 }
 
 function columnAlign(cell) {
-  return (cell.getAttribute('align') || (cell.tagName === 'TH' ? 'center' : 'left')).toLowerCase();
+  const table = cell.closest('table');
+  const col = cellColumnIndex(cell);
+  const source = table?.rows[0]?.cells[col] || cell;
+  return (source.getAttribute('align') || (source.tagName === 'TH' ? 'center' : 'left')).toLowerCase();
 }
 
 function closeTableMenus() {
@@ -2041,11 +2165,14 @@ function resizeTable(targetCols, targetRows) {
   closeTableMenus();
 }
 
-function setTableCellAlign(type) {
+function setTableColumnAlign(type) {
   const ctx = currentTableContext();
   if (!ctx) return;
-  ctx.cell.setAttribute('align', type);
-  focusTableCell(ctx.cell);
+  [...ctx.table.rows].forEach((row) => {
+    const target = row.cells[ctx.col];
+    if (target) target.setAttribute('align', type);
+  });
+  focusTableCell(ctx.table.rows[ctx.row.rowIndex]?.cells[ctx.col] || ctx.cell);
   refreshTableToolbarState();
   notifyTableEdit();
 }
@@ -2174,9 +2301,9 @@ function handleTableToolbarAction(action) {
   if (action === 'toggle-insert') return toggleTableMenu('insert');
   if (action === 'toggle-more') return toggleTableMenu('more');
   closeTableMenus();
-  if (action === 'align-left') return setTableCellAlign('left');
-  if (action === 'align-center') return setTableCellAlign('center');
-  if (action === 'align-right') return setTableCellAlign('right');
+  if (action === 'align-left') return setTableColumnAlign('left');
+  if (action === 'align-center') return setTableColumnAlign('center');
+  if (action === 'align-right') return setTableColumnAlign('right');
   if (action === 'insert-row-above') return insertTableRow('above');
   if (action === 'insert-row-below') return insertTableRow('below');
   if (action === 'insert-col-left') return insertTableColumn('left');
@@ -2373,8 +2500,357 @@ function persistSession() {
   sessionTimer = window.setTimeout(persistSessionNow, 80);
 }
 
+let draftTimer = 0;
+let fileChangePromptOpen = false;
+
+function persistDraftSoon() {
+  if (state.restoringSession) return;
+  window.clearTimeout(draftTimer);
+  draftTimer = window.setTimeout(persistDraftNow, 700);
+}
+
+function clearDraftSoon() {
+  window.clearTimeout(draftTimer);
+  window.markl.clearDraft?.().catch(() => {});
+}
+
+async function persistDraftNow() {
+  if (state.restoringSession) return;
+  if (!state.dirty) {
+    await window.markl.clearDraft().catch(() => {});
+    return;
+  }
+  await window.markl.saveDraft({
+    filePath: state.filePath,
+    workspaceRoot: state.workspaceRoot,
+    content: getMarkdown(),
+    savedContent: state.savedContent
+  }).catch(() => {});
+}
+
+function syncWatch() {
+  window.markl.setWatch?.({
+    workspaceRoot: state.workspaceRoot,
+    filePath: state.filePath
+  }).catch(() => {});
+}
+
+async function rememberDiskStamp(filePath) {
+  if (!filePath) {
+    state.diskMtime = 0;
+    return;
+  }
+  try {
+    const stat = await window.markl.statPath(filePath);
+    state.diskMtime = stat?.mtimeMs || Date.now();
+  } catch {
+    state.diskMtime = Date.now();
+  }
+}
+
+function flattenWorkspaceFiles(nodes, acc = []) {
+  for (const node of nodes || []) {
+    if (node.type === 'file') acc.push(node);
+    else if (node.children?.length) flattenWorkspaceFiles(node.children, acc);
+  }
+  return acc;
+}
+
+function relativeToWorkspace(filePath) {
+  if (!filePath) return '';
+  if (!state.workspaceRoot) return String(filePath).replace(/\\/g, '/');
+  const root = String(state.workspaceRoot).replace(/[\\/]+$/, '');
+  const full = String(filePath);
+  if (full.toLowerCase().startsWith(root.toLowerCase())) {
+    return full.slice(root.length).replace(/^[\\/]+/, '').replace(/\\/g, '/') || full.replace(/\\/g, '/');
+  }
+  return full.replace(/\\/g, '/');
+}
+
+function subsequenceMatch(haystack, needle) {
+  let index = 0;
+  for (const char of haystack) {
+    if (char === needle[index]) index += 1;
+    if (index >= needle.length) return true;
+  }
+  return false;
+}
+
+function scoreWorkspaceFile(query, file) {
+  const q = String(query || '').trim().toLowerCase();
+  const name = String(file.name || '').toLowerCase();
+  const rel = relativeToWorkspace(file.path).toLowerCase();
+  if (!q) return 1;
+  if (name === q || name === `${q}.md`) return 100;
+  if (name.startsWith(q)) return 80;
+  if (name.includes(q)) return 60;
+  if (rel.includes(q)) return 40;
+  if (subsequenceMatch(name, q)) return 20;
+  return 0;
+}
+
+const quickOpen = { open: false, items: [], selected: 0 };
+
+function closeQuickOpen({ restoreFocus = true } = {}) {
+  if (!quickOpen.open) return;
+  quickOpen.open = false;
+  quickOpen.items = [];
+  quickOpen.selected = 0;
+  elements.quickOpen.classList.add('hidden');
+  if (restoreFocus) restoreEditorFocus();
+}
+
+function renderQuickOpenList() {
+  const list = elements.quickOpenList;
+  list.replaceChildren();
+  if (!state.workspaceRoot) {
+    const empty = document.createElement('div');
+    empty.className = 'quick-open-empty';
+    empty.textContent = '先打开一个文件夹';
+    list.append(empty);
+    return;
+  }
+  if (!quickOpen.items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'quick-open-empty';
+    empty.textContent = elements.quickOpenInput.value.trim() ? '没有匹配的文档' : '这个文件夹里还没有文档';
+    list.append(empty);
+    return;
+  }
+  quickOpen.items.forEach((file, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `quick-open-item${index === quickOpen.selected ? ' is-selected' : ''}${samePath(file.path, state.filePath) ? ' is-current' : ''}`;
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', String(index === quickOpen.selected));
+    const name = document.createElement('span');
+    name.className = 'quick-open-name';
+    name.textContent = file.name;
+    const pathLabel = document.createElement('span');
+    pathLabel.className = 'quick-open-path';
+    pathLabel.textContent = relativeToWorkspace(file.path);
+    button.append(name, pathLabel);
+    button.addEventListener('mousedown', (event) => event.preventDefault());
+    button.addEventListener('click', () => openQuickOpenItem(index));
+    list.append(button);
+  });
+  list.querySelector('.is-selected')?.scrollIntoView({ block: 'nearest' });
+}
+
+function refreshQuickOpenItems() {
+  const query = elements.quickOpenInput.value;
+  const ranked = flattenWorkspaceFiles(state.workspaceTree)
+    .map((file) => ({ file, score: scoreWorkspaceFile(query, file) }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || left.file.name.localeCompare(right.file.name, 'zh-CN'));
+  quickOpen.items = ranked.slice(0, 40).map((item) => item.file);
+  if (quickOpen.selected >= quickOpen.items.length) quickOpen.selected = Math.max(0, quickOpen.items.length - 1);
+  renderQuickOpenList();
+}
+
+function openQuickOpen() {
+  closeLanguagePopup({ restoreFocus: false });
+  quickOpen.open = true;
+  quickOpen.selected = 0;
+  elements.quickOpen.classList.remove('hidden');
+  elements.quickOpenInput.value = '';
+  refreshQuickOpenItems();
+  elements.quickOpenInput.focus();
+  elements.quickOpenInput.select();
+}
+
+async function openQuickOpenItem(index) {
+  const file = quickOpen.items[index];
+  if (!file) return;
+  closeQuickOpen({ restoreFocus: false });
+  await openTreeFile(file.path);
+}
+
+function moveQuickOpenSelection(delta) {
+  if (!quickOpen.items.length) return;
+  quickOpen.selected = (quickOpen.selected + delta + quickOpen.items.length) % quickOpen.items.length;
+  renderQuickOpenList();
+}
+
+function jumpToHeadingHash(hash) {
+  const raw = decodeURIComponent(String(hash || '').replace(/^#/, '')).trim();
+  if (!raw) return false;
+  const slug = raw.toLowerCase().replace(/\s+/g, '-');
+  const items = parseHeadingOutline(getMarkdown());
+  const item = items.find((entry) => {
+    const text = String(entry.text || '');
+    return text === raw || text.toLowerCase() === raw.toLowerCase() || text.toLowerCase().replace(/\s+/g, '-') === slug;
+  });
+  if (!item) return false;
+  jumpToOutlineItem(item);
+  return true;
+}
+
+function hrefFromEditorEvent(event) {
+  const anchor = event.target.closest?.('a[href]');
+  if (anchor && elements.editorWrap.contains(anchor)) {
+    return (anchor.getAttribute('href') || '').trim();
+  }
+  const node = event.target.closest?.('[data-type="a"]');
+  if (!node || !elements.editorWrap.contains(node)) return '';
+  if (node.classList.contains('vditor-ir__node--expand') && event.target.closest('.vditor-ir__marker')) {
+    return '';
+  }
+  const marked = node.querySelector('.vditor-ir__marker--link');
+  const nested = node.querySelector('a[href]');
+  return (nested?.getAttribute('href') || marked?.textContent || '').replace(/[\u200b\u00a0]/g, '').trim();
+}
+
+async function handleEditorLink(href) {
+  const raw = String(href || '').trim();
+  if (!raw) return;
+  if (raw.startsWith('#')) {
+    if (!jumpToHeadingHash(raw)) showOperationError('打开链接', new Error('没有找到这个标题。'));
+    return;
+  }
+  try {
+    const result = await window.markl.resolveDocumentLink({
+      documentPath: state.filePath,
+      workspaceRoot: state.workspaceRoot,
+      href: raw
+    });
+    if (result?.kind === 'external' && result.url) {
+      await window.markl.openExternal(result.url);
+      return;
+    }
+    if (result?.kind === 'heading') {
+      if (!jumpToHeadingHash(result.hash)) showOperationError('打开链接', new Error('没有找到这个标题。'));
+      return;
+    }
+    if (result?.kind === 'document' && result.path) {
+      await openTreeFile(result.path);
+      return;
+    }
+    if (result?.kind === 'missing') {
+      showOperationError('打开链接', new Error('这个文件不在磁盘上。'));
+      return;
+    }
+    if (result?.kind === 'other' && result.path) {
+      await window.markl.revealInFolder(result.path);
+    }
+  } catch (error) {
+    showOperationError('打开链接', error);
+  }
+}
+
+async function handleExternalFileChange() {
+  if (!state.filePath || fileChangePromptOpen) return;
+  try {
+    const stat = await window.markl.statPath(state.filePath);
+    if (!stat?.exists) {
+      state.fileMissing = true;
+      state.dirty = true;
+      updateTitle();
+      return;
+    }
+    if (state.diskMtime && stat.mtimeMs && stat.mtimeMs <= state.diskMtime + 20) return;
+    if (!state.dirty) {
+      const result = await window.markl.readFile({ filePath: state.filePath });
+      loadContent(result.filePath, result.content);
+      return;
+    }
+    fileChangePromptOpen = true;
+    const ok = await showAppDialog({
+      title: '文件已更改',
+      message: `磁盘上的「${baseName(state.filePath)}」已经改过了。用磁盘上的版本覆盖当前内容吗？`,
+      ok: '用磁盘版本',
+      cancel: '继续编辑'
+    });
+    fileChangePromptOpen = false;
+    if (ok) {
+      const result = await window.markl.readFile({ filePath: state.filePath });
+      loadContent(result.filePath, result.content);
+    } else {
+      state.diskMtime = stat.mtimeMs || Date.now();
+    }
+    restoreEditorFocus();
+  } catch (error) {
+    fileChangePromptOpen = false;
+    console.warn('处理外部修改失败：', error);
+  }
+}
+
+function handleFsChange(payload) {
+  const paths = payload?.paths || [];
+  if (!paths.length) return;
+  if (state.workspaceRoot && !state.treeDraft) {
+    const treeTouched = paths.some((item) => isPathInside(item, state.workspaceRoot));
+    if (treeTouched) refreshWorkspace().catch(() => {});
+  }
+  if (state.filePath && paths.some((item) => samePath(item, state.filePath))) {
+    handleExternalFileChange();
+  }
+}
+
+async function restoreDraftIfAny(launch) {
+  const draft = await window.markl.readDraft().catch(() => null);
+  if (!draft?.content) return;
+  if (launch?.file && draft.filePath && !samePath(launch.file.filePath, draft.filePath)) return;
+  if (draft.content === getMarkdown()) {
+    await window.markl.clearDraft().catch(() => {});
+    return;
+  }
+  const name = draft.filePath ? baseName(draft.filePath) : '未命名.md';
+  const ok = await showAppDialog({
+    title: '恢复草稿',
+    message: `上次退出前，「${name}」还有未保存的内容。要恢复这份草稿吗？`,
+    ok: '恢复草稿',
+    cancel: '丢掉草稿'
+  });
+  if (!ok) {
+    await window.markl.clearDraft().catch(() => {});
+    restoreEditorFocus();
+    return;
+  }
+  if (draft.filePath && !samePath(draft.filePath, state.filePath)) {
+    state.filePath = draft.filePath;
+  }
+  setMarkdown(draft.content, true);
+  state.savedContent = draft.savedContent ?? '';
+  state.fileMissing = false;
+  recomputeDirty();
+  updateTitle();
+  updateCounts();
+  renderHeadingTree();
+  persistSession();
+  restoreEditorFocus();
+}
+
+function syncWorkspaceChrome() {
+  const open = Boolean(state.workspaceRoot);
+  if (elements.sidebarActions) elements.sidebarActions.classList.toggle('has-workspace', open);
+  if (elements.openFolderButton) {
+    elements.openFolderButton.classList.toggle('primary-button', !open);
+    elements.openFolderButton.classList.toggle('text-button', open);
+    elements.openFolderButton.classList.toggle('open-folder-quiet', open);
+    elements.openFolderButton.textContent = open ? '更换文件夹' : '打开文件夹';
+    elements.openFolderButton.title = open ? '换一个文件夹作为工作区' : '选择一个包含 Markdown 文档的文件夹';
+  }
+  if (elements.workspacePath && !open) {
+    elements.workspacePath.textContent = '.md · .markdown · .txt';
+    elements.workspacePath.title = '';
+  }
+}
+
+function isHistoryExpanded() {
+  return localStorage.getItem(HISTORY_OPEN_KEY) === '1';
+}
+
+function setHistoryExpanded(open) {
+  localStorage.setItem(HISTORY_OPEN_KEY, open ? '1' : '0');
+  elements.openHistory?.classList.toggle('is-collapsed', !open);
+  elements.historyToggle?.setAttribute('aria-expanded', String(open));
+}
+
 function applySessionChrome() {
   if (readSession().sidebarHidden) document.body.classList.add('sidebar-hidden');
+  setHistoryExpanded(isHistoryExpanded());
+  syncWorkspaceChrome();
 }
 
 function expandAncestors(filePath, rootPath) {
@@ -2511,6 +2987,7 @@ function collectFindMatches() {
 
 function isSkippedFindHost(element) {
   if (!element?.closest) return true;
+  if (element.closest('#quick-open, .update-panel, #app-dialog')) return true;
   if (element.closest('.language-popup, .table-toolbar, .find-bar, .markl-live-hl, .vditor-copy')) return true;
   if (element.closest('.vditor-ir__marker')) return true;
 
@@ -2775,7 +3252,12 @@ async function ensureDocumentOnDisk() {
     const stat = await window.markl.statPath(state.filePath);
     if (stat.exists) return true;
   }
-  const ok = window.confirm('插入图片需要先保存文档。现在保存吗？');
+  const ok = await showAppDialog({
+    title: '先保存文档',
+    message: '插入图片需要先把文档保存到磁盘。现在保存吗？',
+    ok: '保存',
+    cancel: '取消'
+  });
   if (!ok) return false;
   return doSave();
 }
@@ -2863,22 +3345,24 @@ async function restoreWorkspaceFromSession(session, options = {}) {
 
 async function restoreOnStartup() {
   state.restoringSession = true;
+  let launch = null;
   try {
-    const launch = await launchContextPromise;
-    if (launchHandled) return;
-    const session = readSession();
-    if (launch?.file) {
-      launchHandled = true;
-      loadContent(launch.file.filePath, launch.file.content);
-      await restoreWorkspaceFromSession(session, { preferFile: launch.file.filePath });
-      return;
-    }
-    await restoreWorkspaceFromSession(session);
-    if (session.filePath) {
-      const stat = await window.markl.statPath(session.filePath);
-      if (stat.exists && stat.kind === 'file') {
-        const result = await window.markl.readFile({ filePath: stat.path || session.filePath });
-        loadContent(result.filePath, result.content);
+    launch = await launchContextPromise;
+    if (!launchHandled) {
+      const session = readSession();
+      if (launch?.file) {
+        launchHandled = true;
+        loadContent(launch.file.filePath, launch.file.content);
+        await restoreWorkspaceFromSession(session, { preferFile: launch.file.filePath });
+      } else {
+        await restoreWorkspaceFromSession(session);
+        if (session.filePath) {
+          const stat = await window.markl.statPath(session.filePath);
+          if (stat.exists && stat.kind === 'file') {
+            const result = await window.markl.readFile({ filePath: stat.path || session.filePath });
+            loadContent(result.filePath, result.content);
+          }
+        }
       }
     }
   } catch (error) {
@@ -2893,11 +3377,16 @@ async function restoreOnStartup() {
     if (findState.open) refreshFindMatches({ stay: true, reveal: false });
     focusEditor();
   }
+  await restoreDraftIfAny(launch);
 }
 
 function createVditor() {
   if (!window.Vditor) {
-    window.alert('编辑器未能加载，请重新启动 MarkL。');
+    showAppDialog({
+      title: '无法启动编辑器',
+      message: '编辑器未能加载，请重新启动 MarkL。',
+      ok: '知道了'
+    });
     return;
   }
 
@@ -2968,22 +3457,213 @@ elements.sidebar.addEventListener('contextmenu', (event) => {
 });
 elements.tabFiles.addEventListener('click', () => setSidebarTab('files'));
 elements.tabOutline.addEventListener('click', () => setSidebarTab('outline'));
-elements.githubLink.addEventListener('click', (event) => {
-  event.preventDefault();
-  window.markl.openExternal(GITHUB_REPO_URL).catch((error) => {
-    showOperationError('打开 GitHub', error);
-  });
-});
 document.getElementById('open-button').addEventListener('click', doOpen);
 document.getElementById('save-button').addEventListener('click', doSave);
-document.getElementById('check-update-button').addEventListener('click', async () => {
-  try {
-    await window.markl.checkUpdate();
-  } catch (error) {
-    showOperationError('检查更新', error);
-  } finally {
-    restoreEditorFocus();
+const updateUi = {
+  open: false,
+  busy: false,
+  cancelled: false,
+  status: '',
+  payload: null
+};
+
+function formatReleaseDate(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function setUpdateBusy(busy) {
+  updateUi.busy = busy;
+  if (!elements.checkUpdateButton) return;
+  elements.checkUpdateButton.disabled = busy;
+  elements.checkUpdateButton.setAttribute('aria-busy', busy ? 'true' : 'false');
+  elements.checkUpdateButton.textContent = busy ? '检查中…' : '检查更新';
+}
+
+function setUpdateShown(el, shown) {
+  el.classList.toggle('hidden', !shown);
+}
+
+function closeUpdatePanel({ dismiss = false, restoreFocus = true } = {}) {
+  if (updateUi.status === 'checking') updateUi.cancelled = true;
+  if (dismiss && updateUi.payload?.latest) {
+    window.markl.dismissUpdate(updateUi.payload.latest).catch(() => {});
   }
+  updateUi.open = false;
+  updateUi.status = '';
+  updateUi.payload = null;
+  elements.updatePanel.classList.add('hidden');
+  elements.updatePanel.classList.remove('is-checking');
+  if (restoreFocus) restoreEditorFocus();
+}
+
+function renderUpdatePanel() {
+  const status = updateUi.status;
+  const data = updateUi.payload || {};
+  elements.updatePanel.classList.toggle('is-checking', status === 'checking');
+  elements.updatePanel.setAttribute('aria-busy', status === 'checking' ? 'true' : 'false');
+
+  const titles = {
+    checking: '检查更新',
+    latest: '已是最新',
+    available: '发现新版本',
+    error: '检查更新'
+  };
+  const leads = {
+    checking: '正在查看 GitHub Release',
+    latest: '当前就是最新版本',
+    available: '',
+    error: '暂时连不上更新服务'
+  };
+  elements.updateTitle.textContent = titles[status] || '检查更新';
+  elements.updateLead.textContent = leads[status] || '';
+  setUpdateShown(elements.updateLead, Boolean(leads[status]));
+
+  if (status === 'latest' && data.current) {
+    elements.updateMeta.textContent = `版本 ${data.current}`;
+    setUpdateShown(elements.updateMeta, true);
+  } else if (status === 'available') {
+    const bits = [];
+    const published = formatReleaseDate(data.publishedAt);
+    if (published) bits.push(published);
+    if (data.portable?.size) bits.push(`绿色版 ${data.portable.size}`);
+    elements.updateMeta.textContent = bits.join(' · ');
+    setUpdateShown(elements.updateMeta, bits.length > 0);
+  } else {
+    elements.updateMeta.textContent = '';
+    setUpdateShown(elements.updateMeta, false);
+  }
+
+  if (status === 'available' && data.current && data.latest) {
+    elements.updateCurrent.textContent = data.current;
+    elements.updateLatest.textContent = data.latest;
+    setUpdateShown(elements.updateVersions, true);
+  } else {
+    setUpdateShown(elements.updateVersions, false);
+    if (status === 'available') {
+      elements.updateLead.textContent = data.latest ? `MarkL ${data.latest}` : '有新版本可下载';
+      setUpdateShown(elements.updateLead, true);
+    }
+  }
+
+  const notes = status === 'available' && Array.isArray(data.notes) ? data.notes : [];
+  elements.updateNotes.replaceChildren();
+  for (const line of notes) {
+    const item = document.createElement('li');
+    item.textContent = line;
+    elements.updateNotes.append(item);
+  }
+  setUpdateShown(elements.updateNotes, notes.length > 0);
+
+  if (status === 'error') {
+    elements.updateError.textContent = data.message || '网络不可用。';
+    setUpdateShown(elements.updateError, true);
+  } else {
+    elements.updateError.textContent = '';
+    setUpdateShown(elements.updateError, false);
+  }
+
+  if (status === 'available') {
+    elements.updateDownload.textContent = data.portable?.url ? '下载绿色版' : '打开发布页';
+  }
+
+  setUpdateShown(elements.updateDownload, status === 'available');
+  setUpdateShown(elements.updateSetup, status === 'available' && Boolean(data.setup?.url));
+  setUpdateShown(elements.updateRetry, status === 'error');
+  setUpdateShown(elements.updateLater, status === 'available');
+  setUpdateShown(elements.updateOk, status === 'latest');
+  setUpdateShown(elements.updateRelease, status === 'available' && Boolean(data.url));
+  setUpdateShown(elements.updateActions, status !== 'checking');
+
+  const describedBy = status === 'error'
+    ? 'update-error'
+    : status === 'available'
+      ? 'update-versions'
+      : 'update-lead';
+  elements.updatePanel.setAttribute('aria-describedby', describedBy);
+}
+
+function focusUpdatePanel() {
+  const preferred = [
+    elements.updateDownload,
+    elements.updateOk,
+    elements.updateRetry,
+    elements.updateClose
+  ].find((button) => button && !button.classList.contains('hidden'));
+  preferred?.focus();
+}
+
+function showUpdatePanel(payload, { focus = false } = {}) {
+  const next = payload || { status: 'error', message: '更新信息无法解析。' };
+  if (updateUi.cancelled && next.status !== 'available') {
+    updateUi.cancelled = false;
+    return;
+  }
+  updateUi.cancelled = false;
+  updateUi.open = true;
+  updateUi.status = next.status || 'error';
+  updateUi.payload = next;
+  renderUpdatePanel();
+  elements.updatePanel.classList.remove('hidden');
+  if (focus) focusUpdatePanel();
+}
+
+async function openUpdateLink(url) {
+  if (!url) return;
+  try {
+    await window.markl.openExternal(url);
+    closeUpdatePanel({ dismiss: updateUi.status === 'available' });
+  } catch (error) {
+    showUpdatePanel({
+      status: 'error',
+      current: updateUi.payload?.current,
+      message: error?.message || String(error)
+    }, { focus: true });
+  }
+}
+
+async function runManualUpdateCheck() {
+  if (updateUi.busy) return;
+  setUpdateBusy(true);
+  showUpdatePanel({ status: 'checking', current: updateUi.payload?.current }, { focus: true });
+  try {
+    const result = await window.markl.checkUpdate();
+    showUpdatePanel(result || { status: 'error', message: '更新信息无法解析。' }, { focus: true });
+  } catch (error) {
+    showUpdatePanel({ status: 'error', message: error?.message || String(error) }, { focus: true });
+  } finally {
+    setUpdateBusy(false);
+  }
+}
+
+elements.checkUpdateButton.addEventListener('click', () => {
+  runManualUpdateCheck();
+});
+elements.updateClose.addEventListener('click', () => {
+  closeUpdatePanel({ dismiss: updateUi.status === 'available' });
+});
+elements.updateLater.addEventListener('click', () => {
+  closeUpdatePanel({ dismiss: true });
+});
+elements.updateOk.addEventListener('click', () => {
+  closeUpdatePanel();
+});
+elements.updateRetry.addEventListener('click', () => {
+  runManualUpdateCheck();
+});
+elements.updateDownload.addEventListener('click', () => {
+  const data = updateUi.payload || {};
+  openUpdateLink(data.portable?.url || data.url);
+});
+elements.updateSetup.addEventListener('click', () => {
+  openUpdateLink(updateUi.payload?.setup?.url);
+});
+elements.updateRelease.addEventListener('click', () => {
+  openUpdateLink(updateUi.payload?.url);
 });
 document.getElementById('sidebar-toggle').addEventListener('click', () => toggleSidebar());
 document.getElementById('status-sidebar-toggle').addEventListener('click', () => toggleSidebar());
@@ -3037,6 +3717,25 @@ elements.findToggleReplace.addEventListener('click', () => {
   if (findState.replaceOpen) elements.replaceInput.focus();
 });
 elements.findClose.addEventListener('click', closeFindBar);
+elements.quickOpenInput.addEventListener('input', () => {
+  quickOpen.selected = 0;
+  refreshQuickOpenItems();
+});
+elements.quickOpenInput.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    moveQuickOpenSelection(1);
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    moveQuickOpenSelection(-1);
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    openQuickOpenItem(quickOpen.selected);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeQuickOpen();
+  }
+});
 elements.replaceOne.addEventListener('click', replaceCurrentMatch);
 elements.replaceAll.addEventListener('click', replaceAllCurrent);
 elements.languageQueryInput.addEventListener('input', () => {
@@ -3049,11 +3748,18 @@ elements.languageQueryInput.addEventListener('keydown', (event) => {
   handlePopupKeydown(event);
 });
 document.getElementById('editor').addEventListener('click', (event) => {
+  const href = hrefFromEditorEvent(event);
+  if (href) {
+    event.preventDefault();
+    event.stopPropagation();
+    handleEditorLink(href);
+    return;
+  }
   const cell = event.target.closest('td, th');
   if (cell) showTableToolbar(cell);
   else if (!event.target.closest('.table-toolbar')) hideTableToolbar();
   window.setTimeout(() => repairEditorCaret(), 0);
-});
+}, true);
 
 document.getElementById('editor').addEventListener('keyup', (event) => {
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing || state.sourceMode || state.popup.visible) return;
@@ -3080,7 +3786,7 @@ elements.editorWrap.addEventListener('mousedown', (event) => {
   if (state.popup.visible && !event.target.closest('.language-popup')) {
     closeLanguagePopup({ restoreFocus: false });
   }
-  if (event.target.closest('.language-popup, .table-toolbar, .find-bar, textarea, button, input')) return;
+  if (event.target.closest('.language-popup, .table-toolbar, .find-bar, .update-panel, #quick-open, #app-dialog, textarea, button, input')) return;
   releaseComposingLock();
   if (event.target.closest('.vditor-ir')) return;
   focusEditor();
@@ -3135,8 +3841,29 @@ window.markl.on('menu:font-size', (fontSize) => setAppearance({ fontSize }));
 window.markl.on('menu:format', formatActiveCode);
 window.markl.on('menu:find', () => openFindBar({ replace: false }));
 window.markl.on('menu:replace', () => openFindBar({ replace: true }));
+window.markl.on('menu:check-update', () => runManualUpdateCheck());
+window.markl.on('menu:quick-open', () => openQuickOpen());
+window.markl.on('menu:about', async () => {
+  let version = '';
+  try {
+    version = await window.markl.getVersion();
+  } catch {
+    version = '';
+  }
+  showAppDialog({
+    title: version ? `MarkL ${version}` : 'MarkL',
+    message: '面向中文用户的轻量 Markdown 编辑器。支持目录管理、即时渲染和代码高亮。',
+    ok: '知道了'
+  });
+});
+window.markl.on('fs:change', (payload) => handleFsChange(payload));
+window.markl.on('update:available', (payload) => {
+  if (updateUi.open && updateUi.status !== 'checking') return;
+  showUpdatePanel(payload, { focus: false });
+});
 window.markl.on('app:before-close', async () => {
   persistSessionNow();
+  await persistDraftNow();
   if (await confirmDiscardIfDirty()) window.markl.doClose();
 });
 
@@ -3166,12 +3893,27 @@ document.addEventListener('compositioncancel', () => {
 }, true);
 
 document.addEventListener('keydown', (event) => {
+  if (isAppDialogOpen()) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeAppDialog(false);
+    } else if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      closeAppDialog(true);
+    }
+    return;
+  }
   const key = event.key.toLowerCase();
   const modifier = event.ctrlKey || event.metaKey;
   if (modifier && key === 's') {
     event.preventDefault();
     if (event.shiftKey) doSaveAs();
     else doSave();
+    return;
+  }
+  if (modifier && key === 'p') {
+    event.preventDefault();
+    openQuickOpen();
     return;
   }
   if (modifier && key === 'f') {
@@ -3194,6 +3936,11 @@ document.addEventListener('keydown', (event) => {
     formatActiveCode();
     return;
   }
+  if (event.key === 'Escape' && quickOpen.open) {
+    event.preventDefault();
+    closeQuickOpen();
+    return;
+  }
   if (event.key === 'Escape' && tableUi.menu) {
     event.preventDefault();
     closeTableMenus();
@@ -3202,13 +3949,18 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && findState.open && !state.popup.visible) {
     event.preventDefault();
     closeFindBar();
+    return;
+  }
+  if (event.key === 'Escape' && updateUi.open && !event.target.closest('#find-bar')) {
+    event.preventDefault();
+    closeUpdatePanel({ dismiss: updateUi.status === 'available' });
   }
 }, true);
 
 document.addEventListener('keydown', (event) => {
   if (state.sourceMode || state.popup.visible || event.isComposing) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
-  if (document.activeElement?.closest?.('.tree-draft-row, #find-bar')) return;
+  if (document.activeElement?.closest?.('.tree-draft-row, #find-bar, #update-panel, #quick-open, #app-dialog')) return;
   const ir = getIrElement();
   if (!ir) return;
 
@@ -3249,12 +4001,25 @@ window.addEventListener('resize', () => {
   if (tableUi.table?.isConnected) positionTableToolbar(tableUi.table);
 });
 
-elements.clearHistoryButton.addEventListener('click', () => {
+elements.clearHistoryButton.addEventListener('click', async () => {
   if (!readHistory().length) return;
-  if (!window.confirm('确定清空全部打开历史？')) return;
+  const ok = await showAppDialog({
+    title: '清空打开历史',
+    message: '确定清空全部打开历史？',
+    ok: '清空',
+    cancel: '取消',
+    danger: true
+  });
+  if (!ok) return;
   writeHistory([]);
   renderHistory();
 });
+elements.historyToggle?.addEventListener('click', () => {
+  setHistoryExpanded(!isHistoryExpanded());
+});
+elements.appDialogOk?.addEventListener('click', () => closeAppDialog(true));
+elements.appDialogCancel?.addEventListener('click', () => closeAppDialog(false));
+elements.appDialogBackdrop?.addEventListener('click', () => closeAppDialog(false));
 
 function transferLooksLikeFiles(dataTransfer) {
   if (!dataTransfer) return false;
@@ -3266,7 +4031,7 @@ document.addEventListener('paste', async (event) => {
   const files = filesFromDataTransfer(event.clipboardData);
   if (!files.length) return;
   const target = event.target;
-  if (target?.closest?.('#find-bar, .tree-draft-row') || (target?.closest?.('input, textarea') && target !== elements.sourceEditor)) {
+  if (target?.closest?.('#find-bar, #update-panel, #quick-open, #app-dialog, .tree-draft-row') || (target?.closest?.('input, textarea') && target !== elements.sourceEditor)) {
     return;
   }
   event.preventDefault();
