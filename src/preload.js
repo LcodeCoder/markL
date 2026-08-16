@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('markl', {
   statPath: (targetPath) => ipcRenderer.invoke('path:stat', targetPath),
   showTreeMenu: (payload) => ipcRenderer.invoke('tree:context-menu', payload),
   formatCode: (options) => ipcRenderer.invoke('code:format', options),
+  saveImage: (options) => ipcRenderer.invoke('image:save', options),
+  resolveImages: (options) => ipcRenderer.invoke('image:resolve', options),
+  getLaunchContext: () => ipcRenderer.invoke('app:launch-context'),
 
   setTitle: (title) => ipcRenderer.send('app:set-title', title),
   doClose: () => ipcRenderer.send('app:do-close'),
@@ -35,6 +38,8 @@ contextBridge.exposeInMainWorld('markl', {
       'menu:toggle-sidebar',
       'menu:theme',
       'menu:format',
+      'menu:find',
+      'menu:replace',
       'app:before-close'
     ];
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_event, ...args) => callback(...args));

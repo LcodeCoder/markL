@@ -76,7 +76,6 @@
           <button id="sidebar-toggle" class="icon-button" type="button" title="显示或隐藏目录栏" aria-label="显示或隐藏目录栏">
             <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M2.5 4.25h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Zm0 3h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Zm0 3h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Z"/></svg>
           </button>
-          <img src="../../assets/logo-mark.png" alt="" class="document-mark" />
           <div class="document-name-group">
             <div class="document-title-row">
               <span id="doc-title">未命名.md</span>
@@ -103,13 +102,13 @@
             <button id="table-insert-button" type="button" data-table-action="toggle-insert" title="插入行或列" aria-label="插入行或列" aria-haspopup="menu" aria-expanded="false">
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3.25 2A1.25 1.25 0 0 0 2 3.25v9.5A1.25 1.25 0 0 0 3.25 14h9.5A1.25 1.25 0 0 0 14 12.75v-9.5A1.25 1.25 0 0 0 12.75 2h-9.5ZM3.5 6.5h3v3h-3v-3Zm4.5 0h4.5v3H8v-3Zm-4.5 4.5h3v2.5H3.75a.25.25 0 0 1-.25-.25V11Zm4.5 0h4.5v2.25a.25.25 0 0 1-.25.25H8V11ZM6.5 3.5v1.5h-3V3.75c0-.138.112-.25.25-.25H6.5Zm1.5 0h4.25c.138 0 .25.112.25.25V5H8V3.5Z"/></svg>
             </button>
-            <button type="button" data-table-action="align-left" title="居左" aria-label="居左">
+            <button type="button" data-table-action="align-left" title="当前单元格居左" aria-label="当前单元格居左">
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M2.25 3.15h11.5v1.2H2.25zm0 4.25h8.2v1.2h-8.2zm0 4.25h11.5v1.2H2.25z"/></svg>
             </button>
-            <button type="button" data-table-action="align-center" title="居中" aria-label="居中">
+            <button type="button" data-table-action="align-center" title="当前单元格居中" aria-label="当前单元格居中">
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M2.25 3.15h11.5v1.2H2.25zm2.15 4.25h7.2v1.2h-7.2zM2.25 11.65h11.5v1.2H2.25z"/></svg>
             </button>
-            <button type="button" data-table-action="align-right" title="居右" aria-label="居右">
+            <button type="button" data-table-action="align-right" title="当前单元格居右" aria-label="当前单元格居右">
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M2.25 3.15h11.5v1.2H2.25zm3.3 4.25h8.2v1.2h-8.2zM2.25 11.65h11.5v1.2H2.25z"/></svg>
             </button>
           </div>
@@ -140,6 +139,31 @@
           <input id="language-query-input" class="language-query-input" type="text" placeholder="输入语言，例如 java" autocomplete="off" />
           <div id="language-list" class="language-list"></div>
         </div>
+        <div id="find-bar" class="find-bar hidden" role="search" aria-label="查找和替换">
+          <div class="find-row">
+            <input id="find-input" class="find-input" type="text" placeholder="查找" autocomplete="off" spellcheck="false" />
+            <span id="find-count" class="find-count" aria-live="polite"></span>
+            <button id="find-case" type="button" title="区分大小写" aria-label="区分大小写" aria-pressed="false">Aa</button>
+            <button id="find-prev" type="button" title="上一个（Shift+Enter）" aria-label="上一个">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 3.2 3.4 7.8a.7.7 0 1 0 1 1L7.3 5.9V12.5a.7.7 0 1 0 1.4 0V5.9l2.9 2.9a.7.7 0 1 0 1-1z"/></svg>
+            </button>
+            <button id="find-next" type="button" title="下一个（Enter）" aria-label="下一个">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 12.8 3.4 8.2a.7.7 0 1 1 1-1l2.9 2.9V3.5a.7.7 0 1 1 1.4 0v6.6l2.9-2.9a.7.7 0 1 1 1 1z"/></svg>
+            </button>
+            <button id="find-toggle-replace" type="button" title="显示替换" aria-label="显示替换" aria-expanded="false">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M3.2 5.2 8 10l4.8-4.8-.9-.9L8 8.2 4.1 4.3z"/></svg>
+            </button>
+            <button id="find-close" type="button" title="关闭（Esc）" aria-label="关闭查找">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="m4.2 3.2 3.8 3.8 3.8-3.8.9.9L8.9 8l3.8 3.8-.9.9L8 8.9l-3.8 3.8-.9-.9L7.1 8 3.3 4.2z"/></svg>
+            </button>
+          </div>
+          <div id="replace-row" class="find-row replace-row hidden">
+            <input id="replace-input" class="find-input" type="text" placeholder="替换为" autocomplete="off" spellcheck="false" />
+            <button id="replace-one" class="find-text-button" type="button" title="替换当前（Ctrl+Alt+Enter）">替换</button>
+            <button id="replace-all" class="find-text-button" type="button" title="全部替换">全部替换</button>
+          </div>
+        </div>
+        <div id="drop-mask" class="drop-mask" aria-hidden="true">将图片放到文档中</div>
       </section>
 
       <footer id="statusbar">

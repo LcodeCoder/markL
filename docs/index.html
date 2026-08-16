@@ -88,19 +88,31 @@
           <p>新建、打开、保存、另存为都有菜单和快捷键。切换文件或退出时，若有未保存修改会中文确认。文档按 UTF-8 读写。安装后可双击 <code>.md</code> / <code>.markdown</code> 用 MarkL 打开。</p>
         </li>
         <li class="feature">
-          <h3>6. 导出 HTML</h3>
+          <h3>6. 查找与替换</h3>
+          <p><kbd>Ctrl</kbd>+<kbd>F</kbd> 打开查找条，<kbd>Ctrl</kbd>+<kbd>H</kbd> 展开替换。即时渲染和源码共用结果。输入即搜，<kbd>Enter</kbd> / <kbd>F3</kbd> 下一个，<kbd>Aa</kbd> 区分大小写。</p>
+        </li>
+        <li class="feature">
+          <h3>7. 粘贴与拖入图片</h3>
+          <p>截图粘贴或把图片拖进正文，会存到当前文档旁的 <code>assets/</code>，并插入相对路径。尚未保存时会先请你保存文档。已有的相对路径图片按文档目录解析。</p>
+        </li>
+        <li class="feature">
+          <h3>8. 启动恢复</h3>
+          <p>下次打开会回到上次的文件夹、文档和目录栏显隐。若从资源管理器双击某个 Markdown，则以该文件为准。</p>
+        </li>
+        <li class="feature">
+          <h3>9. 导出 HTML</h3>
           <p>「文件 → 导出 HTML」生成带基础样式的独立网页：标题、段落、表格、灰底代码块都在，发给别人用浏览器就能看。</p>
         </li>
         <li class="feature">
-          <h3>7. 浅色 / 深色主题</h3>
+          <h3>10. 浅色 / 深色主题</h3>
           <p>菜单「主题」切换，选择会记住。侧栏、正文、代码框、语言弹窗、状态栏一起变，不会只换背景漏掉字。</p>
         </li>
         <li class="feature">
-          <h3>8. 状态栏与目录栏</h3>
+          <h3>11. 状态栏与目录栏</h3>
           <p>底部显示保存状态、即时渲染或源码、UTF-8、按中文习惯统计的字数和字符数。<kbd>Ctrl</kbd>+<kbd>B</kbd> 收起目录栏；窄窗口里目录栏改成抽屉。</p>
         </li>
         <li class="feature">
-          <h3>9. Windows 桌面身份</h3>
+          <h3>12. Windows 桌面身份</h3>
           <p>任务栏和跳转列表写的是 MarkL，不是 Electron。安装包可加桌面 / 开始菜单快捷方式，并关联 Markdown 文件。同时提供安装版和绿色版。</p>
         </li>
       </ol>
@@ -143,6 +155,9 @@
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>打开文件夹</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>保存</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>另存为</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>查找</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td><td>替换</td></tr>
+          <tr><td><kbd>F3</kbd></td><td>下一个匹配</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>即时渲染 ⇄ 源码</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>显示或隐藏目录栏</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>L</kbd></td><td>格式化当前代码块</td></tr>

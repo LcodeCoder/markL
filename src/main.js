@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL, fileURLToPath } = require('url');
 
 const APP_ID = 'com.haiyu.markl';
 const ICON_ICO = path.join(__dirname, '..', 'assets', 'icon.ico');
@@ -41,13 +42,26 @@ function registerWindowsIdentity() {
 }
 
 let mainWindow = null;
-let fileToOpenOnLaunch = null;
+let launchDocument = null;
 let currentWorkspace = null;
 
 const DOCUMENT_RE = /\.(md|markdown|txt)$/i;
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico', '.avif']);
+const MIME_IMAGE_EXT = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/svg+xml': '.svg',
+  'image/bmp': '.bmp',
+  'image/x-icon': '.ico',
+  'image/avif': '.avif'
+};
 const IGNORED_DIRECTORIES = new Set(['.git', '.svn', 'node_modules', 'dist', 'build', '.cache']);
 const MAX_TREE_DEPTH = 16;
 const MAX_TREE_ITEMS = 2500;
+const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 
 function extractFileArg(argv) {
   for (let i = 1; i < argv.length; i += 1) {
@@ -65,7 +79,7 @@ function createWindow() {
     height: 820,
     minWidth: 700,
     minHeight: 520,
-    backgroundColor: '#eef1f5',
+    backgroundColor: '#f4f5f7',
     icon: ICON_ICO,
     title: 'MarkL',
     webPreferences: {
@@ -78,11 +92,8 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
-  mainWindow.webContents.on('did-finish-load', () => {
-    if (fileToOpenOnLaunch) {
-      sendOpenFile(fileToOpenOnLaunch);
-      fileToOpenOnLaunch = null;
-    }
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== mainWindow.webContents.getURL()) event.preventDefault();
   });
 
   mainWindow.on('close', (event) => {
@@ -205,6 +216,9 @@ function buildMenu() {
         { type: 'separator' },
         { role: 'selectAll', label: '全选' },
         { type: 'separator' },
+        { label: '查找', accelerator: 'CmdOrCtrl+F', click: send('menu:find') },
+        { label: '替换', accelerator: 'CmdOrCtrl+H', click: send('menu:replace') },
+        { type: 'separator' },
         { label: '格式化代码块', accelerator: 'Ctrl+Alt+L', click: send('menu:format') }
       ]
     },
@@ -317,6 +331,102 @@ ipcMain.handle('dialog:export-html', async (_event, { defaultPath }) => {
 ipcMain.handle('file:write', async (_event, { filePath, content }) => {
   fs.writeFileSync(path.resolve(filePath), content, 'utf8');
   return true;
+});
+
+function toPosixRelative(fromDir, target) {
+  let relative = path.relative(fromDir, target).split(path.sep).join('/');
+  if (!relative || relative === '.') return './';
+  if (!relative.startsWith('.') && !path.isAbsolute(relative)) relative = `./${relative}`;
+  return relative;
+}
+
+function ensureImageFileName(name, mime) {
+  const fallbackExt = MIME_IMAGE_EXT[String(mime || '').toLowerCase()] || '.png';
+  let fileName = String(name || `pasted${fallbackExt}`).trim() || `pasted${fallbackExt}`;
+  fileName = path.basename(fileName).replace(/[\\/:*?"<>|]/g, '-');
+  if (!fileName || fileName === '.' || fileName === '..') fileName = `pasted${fallbackExt}`;
+  const ext = path.extname(fileName).toLowerCase();
+  if (!IMAGE_EXTENSIONS.has(ext)) fileName += fallbackExt;
+  return fileName;
+}
+
+function bufferFromIpcBytes(bytes) {
+  if (!bytes) return Buffer.alloc(0);
+  if (Buffer.isBuffer(bytes)) return bytes;
+  if (bytes instanceof ArrayBuffer) return Buffer.from(bytes);
+  if (ArrayBuffer.isView(bytes)) return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (Array.isArray(bytes)) return Buffer.from(bytes);
+  if (typeof bytes === 'object') return Buffer.from(Uint8Array.from(Object.values(bytes)));
+  return Buffer.alloc(0);
+}
+
+ipcMain.handle('image:save', async (_event, { documentPath, name, mime, bytes }) => {
+  if (!documentPath) throw new Error('请先保存文档，再插入图片。');
+  const documentFile = path.resolve(documentPath);
+  if (!fs.existsSync(documentFile) || !fs.statSync(documentFile).isFile()) {
+    throw new Error('当前文档还不在磁盘上。');
+  }
+
+  const buffer = bufferFromIpcBytes(bytes);
+  if (!buffer.length) throw new Error('没有可用的图片数据。');
+  if (buffer.length > MAX_IMAGE_BYTES) throw new Error('图片超过 25 MB。');
+
+  const assetsDir = path.join(path.dirname(documentFile), 'assets');
+  fs.mkdirSync(assetsDir, { recursive: true });
+  const dest = uniquePath(assetsDir, ensureImageFileName(name, mime));
+  fs.writeFileSync(dest, buffer);
+  return {
+    filePath: dest,
+    relative: toPosixRelative(path.dirname(documentFile), dest),
+    fileUrl: pathToFileURL(dest).href
+  };
+});
+
+ipcMain.handle('image:resolve', async (_event, { documentPath, sources }) => {
+  if (!documentPath || !Array.isArray(sources)) return [];
+  const baseDir = path.dirname(path.resolve(documentPath));
+  return sources.map((raw) => {
+    const src = String(raw || '').trim();
+    if (!src) return { src, exists: false };
+    if (/^(https?:|data:|blob:)/i.test(src)) {
+      return { src, fileUrl: src, relative: src, exists: true, remote: true };
+    }
+
+    try {
+      if (/^file:/i.test(src)) {
+        const absolute = fileURLToPath(src);
+        if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
+          return { src, exists: false };
+        }
+        return {
+          src,
+          fileUrl: pathToFileURL(absolute).href,
+          relative: toPosixRelative(baseDir, absolute),
+          exists: true
+        };
+      }
+
+      const decoded = decodeURI(src.split(/[?#]/)[0]);
+      const absolute = path.resolve(baseDir, decoded);
+      if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
+        return { src, exists: false };
+      }
+      return {
+        src,
+        fileUrl: pathToFileURL(absolute).href,
+        relative: src,
+        exists: true
+      };
+    } catch {
+      return { src, exists: false };
+    }
+  });
+});
+
+ipcMain.handle('app:launch-context', async () => {
+  const document = launchDocument;
+  launchDocument = null;
+  return { file: document };
 });
 
 ipcMain.handle('file:read', async (_event, { filePath }) => readDocument(filePath));
@@ -513,7 +623,14 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
-    fileToOpenOnLaunch = extractFileArg(process.argv);
+    const launchPath = extractFileArg(process.argv);
+    if (launchPath) {
+      try {
+        launchDocument = readDocument(launchPath);
+      } catch (error) {
+        dialog.showErrorBox('无法打开文件', `${launchPath}\n\n${error.message}`);
+      }
+    }
     registerWindowsIdentity();
     createWindow();
     buildMenu();

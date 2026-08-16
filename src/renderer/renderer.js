@@ -1,3 +1,15 @@
+import {
+  FIND_MATCH_LIMIT,
+  collectMatches,
+  replaceRange,
+  replaceAllMatches,
+  lineNumberAt,
+  visibleLineHint,
+  toMarkdownImage,
+  rewriteFileUrls,
+  imageAltFromName
+} from './text-search.js';
+
 const LANGUAGES = [
   { id: 'javascript', label: 'JavaScript', aliases: ['js', 'node'], description: '网页与 Node.js' },
   { id: 'typescript', label: 'TypeScript', aliases: ['ts'], description: '带类型的 JavaScript' },
@@ -29,7 +41,9 @@ const CONTENT_THEME_PATH = new URL('../../node_modules/vditor/dist/css/content-t
 const HISTORY_KEY = 'markl-open-history';
 const HISTORY_LIMIT = 16;
 const SIDEBAR_TAB_KEY = 'markl-sidebar-tab';
+const SESSION_KEY = 'markl-session';
 const GITHUB_REPO_URL = 'https://github.com/LcodeCoder/markL';
+const IMAGE_FILE_RE = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
 
 const state = {
   filePath: null,
@@ -44,7 +58,8 @@ const state = {
   popup: { visible: false, query: '', items: [], selected: 0, suppressUntil: 0 },
   treeDraft: null,
   sourceMode: false,
-  editorReady: false
+  editorReady: false,
+  restoringSession: false
 };
 
 const elements = {
@@ -79,7 +94,20 @@ const elements = {
   tableInsertButton: document.getElementById('table-insert-button'),
   tableMoreButton: document.getElementById('table-more-button'),
   tableInsertMenu: document.getElementById('table-insert-menu'),
-  tableMoreMenu: document.getElementById('table-more-menu')
+  tableMoreMenu: document.getElementById('table-more-menu'),
+  findBar: document.getElementById('find-bar'),
+  findInput: document.getElementById('find-input'),
+  findCount: document.getElementById('find-count'),
+  findCase: document.getElementById('find-case'),
+  findPrev: document.getElementById('find-prev'),
+  findNext: document.getElementById('find-next'),
+  findToggleReplace: document.getElementById('find-toggle-replace'),
+  findClose: document.getElementById('find-close'),
+  replaceRow: document.getElementById('replace-row'),
+  replaceInput: document.getElementById('replace-input'),
+  replaceOne: document.getElementById('replace-one'),
+  replaceAll: document.getElementById('replace-all'),
+  dropMask: document.getElementById('drop-mask')
 };
 
 function normalizeMarkdown(content = '') {
@@ -98,12 +126,14 @@ function escapeRegExp(value) {
 let vditor = null;
 
 function getMarkdown() {
-  if (state.sourceMode) return elements.sourceEditor.value || '';
-  return vditor?.getValue?.() || '';
+  const raw = state.sourceMode
+    ? (elements.sourceEditor.value || '')
+    : (vditor?.getValue?.() || '');
+  return sanitizeImageMarkdown(raw);
 }
 
 function getHTML() {
-  return vditor?.getHTML?.() || '';
+  return sanitizeImageMarkdown(vditor?.getHTML?.() || '');
 }
 
 function setMarkdown(content, clearStack = true) {
@@ -142,7 +172,7 @@ function isHiddenVisual(el) {
 
 function isUnusableCaretHost(el) {
   if (!el) return true;
-  if (el.closest('.markl-live-hl, .language-popup, .table-toolbar, #source-editor')) return true;
+  if (el.closest('.markl-live-hl, .language-popup, .table-toolbar, .find-bar, #source-editor')) return true;
   if (el.closest('.vditor-ir__preview')) return true;
   if (el.closest('[data-type$="-open-marker"], [data-type$="-close-marker"]')) return true;
   const ir = getIrElement();
@@ -442,6 +472,11 @@ function loadContent(filePath, content) {
   updateCounts();
   renderHeadingTree();
   if (filePath) rememberOpen('file', filePath);
+  expandAncestors(filePath, state.workspaceRoot);
+  updateActiveTreeItem();
+  scheduleImageResolve();
+  refreshFindMatches({ stay: true });
+  persistSession();
   restoreEditorFocus();
 }
 
@@ -467,6 +502,9 @@ async function doNew() {
   markClean('');
   updateCounts();
   renderHeadingTree();
+  updateActiveTreeItem();
+  refreshFindMatches({ stay: false });
+  persistSession();
   focusEditor();
 }
 
@@ -516,6 +554,8 @@ async function doSaveAs() {
     markClean(content);
     rememberOpen('file', target);
     if (isPathInside(target, state.workspaceRoot)) await refreshWorkspace();
+    scheduleImageResolve();
+    persistSession();
     restoreEditorFocus();
     return true;
   } catch (error) {
@@ -546,7 +586,7 @@ async function doExportHtml() {
 body{max-width:760px;margin:48px auto;padding:0 24px 80px;font-family:"Microsoft YaHei UI","PingFang SC",sans-serif;line-height:1.8;color:#1a1f27;overflow-wrap:anywhere}
 pre{background:#eef1f5;padding:16px 16px 28px;border-radius:8px;overflow:auto;position:relative}code{font-family:"Cascadia Code",Consolas,monospace}pre code{background:none;padding:0}
 blockquote{color:#5c6674;border-left:3px solid #d5dbe3;margin-left:0;padding-left:16px}
-table{width:max-content;max-width:100%;table-layout:auto;border-collapse:collapse;word-break:break-word}th,td{border:1px solid #d5dbe3;padding:7px 12px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;vertical-align:top}img{max-width:100%}center{text-align:center}
+table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;word-break:break-word}th,td{border:1px solid #d5dbe3;padding:7px 12px;white-space:normal;overflow-wrap:break-word;word-break:break-word;vertical-align:top}img{max-width:100%}center{text-align:center}
 </style>
 </head>
 <body>
@@ -663,6 +703,7 @@ function createTreeNode(node, depth = 0) {
     row.addEventListener('click', () => {
       if (expanded) state.expandedPaths.delete(node.path);
       else state.expandedPaths.add(node.path);
+      persistSession();
       renderFileTree();
     });
     row.append(chevron, folderIcon(), name);
@@ -946,20 +987,28 @@ function setSidebarTab(tab) {
   if (!files) renderHeadingTree();
 }
 
-function applyWorkspace(payload) {
+function applyWorkspace(payload, options = {}) {
   if (!payload) return;
+  const previousExpanded = state.expandedPaths;
   state.workspaceRoot = payload.rootPath;
   state.workspaceName = payload.rootName;
   state.workspaceTree = payload.tree || [];
-  state.expandedPaths = new Set(
-    state.workspaceTree.filter((node) => node.type === 'directory').map((node) => node.path)
-  );
+  if (options.keepExpanded) {
+    state.expandedPaths = previousExpanded;
+  } else if (Array.isArray(options.expandedPaths) && options.expandedPaths.length) {
+    state.expandedPaths = new Set(options.expandedPaths);
+  } else {
+    state.expandedPaths = new Set(
+      state.workspaceTree.filter((node) => node.type === 'directory').map((node) => node.path)
+    );
+  }
   elements.workspaceName.textContent = state.workspaceName;
   elements.workspacePath.textContent = state.workspaceRoot;
   elements.workspaceHeading.classList.remove('hidden');
   elements.refreshTreeButton.classList.remove('hidden');
   elements.newTreeButton.classList.remove('hidden');
   renderFileTree();
+  persistSession();
 }
 
 async function doOpenFolder() {
@@ -980,12 +1029,7 @@ async function refreshWorkspace() {
   if (!state.workspaceRoot) return;
   try {
     const payload = await window.markl.refreshWorkspace(state.workspaceRoot);
-    if (payload) {
-      const expanded = state.expandedPaths;
-      applyWorkspace(payload);
-      state.expandedPaths = expanded;
-      renderFileTree();
-    }
+    if (payload) applyWorkspace(payload, { keepExpanded: true });
   } catch (error) {
     showOperationError('刷新目录', error);
   }
@@ -1011,6 +1055,8 @@ function toggleMode() {
     hideTableToolbar();
   }
   recomputeDirty();
+  scheduleImageResolve();
+  refreshFindMatches({ stay: true });
 }
 
 function startTreeDraft({ mode, parentPath, targetPath, value }) {
@@ -1125,6 +1171,7 @@ async function handleTreeAction(action, kind, targetPath) {
         markClean('');
         updateCounts();
         renderHeadingTree();
+        persistSession();
       }
       forgetOpenTree(targetPath);
       await refreshWorkspace();
@@ -1183,6 +1230,7 @@ function toggleSidebar(force) {
     const hidden = typeof force === 'boolean' ? !force : !document.body.classList.contains('sidebar-hidden');
     document.body.classList.toggle('sidebar-hidden', hidden);
   }
+  persistSession();
   scheduleTableBalance();
 }
 
@@ -1309,6 +1357,107 @@ function hasHighlightSpans(code) {
   return Boolean(code.querySelector('span[class*="hljs-"]'));
 }
 
+const HIGHLIGHT_EXTRAS = {
+  java: {
+    type: new Set([
+      'String', 'StringBuilder', 'StringBuffer', 'CharSequence', 'Appendable',
+      'Integer', 'Long', 'Short', 'Byte', 'Float', 'Double', 'Boolean', 'Character',
+      'Object', 'Class', 'Void', 'Number', 'Enum', 'Record', 'System', 'Math',
+      'Thread', 'Runnable', 'Throwable', 'Exception', 'RuntimeException', 'Error',
+      'Iterable', 'Iterator', 'Comparable', 'Cloneable', 'AutoCloseable',
+      'Collection', 'List', 'Set', 'Map', 'Queue', 'Deque', 'Optional',
+      'ArrayList', 'LinkedList', 'HashMap', 'HashSet', 'TreeMap', 'TreeSet',
+      'Arrays', 'Collections', 'Objects', 'Stream', 'Collectors',
+      'LocalDate', 'LocalTime', 'LocalDateTime', 'Instant', 'Duration', 'Period',
+      'Path', 'Paths', 'Files', 'File', 'Scanner', 'UUID', 'URL', 'URI',
+      'BigDecimal', 'BigInteger', 'Date', 'Calendar', 'Locale', 'Pattern', 'Matcher',
+      'Consumer', 'Function', 'Predicate', 'Supplier', 'Comparator',
+      'Override', 'Deprecated', 'SuppressWarnings', 'SafeVarargs', 'FunctionalInterface'
+    ]),
+    pascalType: true
+  },
+  csharp: {
+    type: new Set([
+      'String', 'Object', 'Console', 'List', 'Dictionary', 'HashSet', 'Queue', 'Stack',
+      'IEnumerable', 'IList', 'IDictionary', 'ICollection', 'IReadOnlyList',
+      'StringBuilder', 'Task', 'ValueTask', 'Action', 'Func', 'Predicate',
+      'DateTime', 'TimeSpan', 'Guid', 'Exception', 'ArgumentException',
+      'InvalidOperationException', 'HttpClient', 'File', 'Path', 'Directory',
+      'Math', 'Convert', 'Environment', 'Array', 'Type', 'Nullable', 'Span',
+      'Memory', 'ReadOnlySpan', 'CancellationToken', 'Encoding'
+    ]),
+    pascalType: true
+  },
+  cpp: {
+    built_in: new Set([
+      'std', 'cout', 'cin', 'cerr', 'clog', 'endl', 'string', 'wstring', 'string_view',
+      'vector', 'map', 'set', 'unordered_map', 'unordered_set', 'optional', 'variant',
+      'unique_ptr', 'shared_ptr', 'weak_ptr', 'make_unique', 'make_shared',
+      'size_t', 'uint8_t', 'uint16_t', 'uint32_t', 'uint64_t',
+      'int8_t', 'int16_t', 'int32_t', 'int64_t'
+    ])
+  },
+  python: {
+    type: new Set([
+      'Path', 'PurePath', 'Enum', 'IntEnum', 'TypedDict', 'Protocol',
+      'Final', 'ClassVar', 'Annotated', 'Self', 'LiteralString'
+    ])
+  },
+  css: {
+    caseInsensitive: true,
+    literal: new Set([
+      'flex', 'grid', 'block', 'inline', 'inline-block', 'inline-flex', 'none',
+      'absolute', 'relative', 'fixed', 'sticky', 'static', 'hidden', 'visible',
+      'auto', 'inherit', 'initial', 'unset', 'revert', 'center', 'wrap', 'nowrap',
+      'row', 'column', 'solid', 'dashed', 'dotted', 'transparent', 'pointer',
+      'default', 'bold', 'italic', 'space-between', 'space-around', 'space-evenly',
+      'stretch', 'baseline', 'hidden', 'scroll'
+    ])
+  }
+};
+
+function isPascalTypeName(name) {
+  return /^[A-Z][a-z][\w$]*$/.test(name) || /^[A-Z][A-Za-z0-9]*[a-z][\w$]*$/.test(name);
+}
+
+function extraClassForToken(name, extra) {
+  const key = extra.caseInsensitive ? name.toLowerCase() : name;
+  if (extra.type?.has(name) || extra.type?.has(key)) return 'hljs-type';
+  if (extra.built_in?.has(name) || extra.built_in?.has(key)) return 'hljs-built_in';
+  if (extra.literal?.has(name) || extra.literal?.has(key)) return 'hljs-literal';
+  if (extra.keyword?.has(name) || extra.keyword?.has(key)) return 'hljs-keyword';
+  if (extra.pascalType && isPascalTypeName(name)) return 'hljs-type';
+  return '';
+}
+
+function decorateHighlightExtras(html, language) {
+  const extra = HIGHLIGHT_EXTRAS[language];
+  if (!extra) return html;
+  const skip = [];
+  return html.replace(/<[^>]+>|[^<]+/g, (token) => {
+    if (token.startsWith('<')) {
+      if (/^<span\b/i.test(token)) {
+        const cls = (token.match(/class="([^"]*)"/) || [])[1] || '';
+        skip.push(/\bhljs-(comment|string|regexp|doctag)\b/.test(cls));
+      } else if (/^<\/span/i.test(token)) {
+        skip.pop();
+      }
+      return token;
+    }
+    if (skip.some(Boolean)) return token;
+    return token.replace(/\b[A-Za-z_][\w$-]*\b/g, (name) => {
+      const cls = extraClassForToken(name, extra);
+      return cls ? `<span class="${cls}">${name}</span>` : name;
+    });
+  });
+}
+
+function highlightSource(source, language) {
+  const lang = language === 'jsp' ? 'java' : language;
+  let html = window.hljs.highlight(source, { language: lang, ignoreIllegals: true }).value;
+  return decorateHighlightExtras(html, lang);
+}
+
 function highlightCodePreviews() {
   if (!window.hljs || isEditorComposing()) return;
   highlightingPreviews = true;
@@ -1324,7 +1473,7 @@ function highlightCodePreviews() {
       const key = `${language}\0${source}`;
       if (code.dataset.marklHl === key && hasHighlightSpans(code)) return;
       code.className = `language-${language} hljs`;
-      code.innerHTML = window.hljs.highlight(source, { language, ignoreIllegals: true }).value;
+      code.innerHTML = highlightSource(source, language);
       code.dataset.marklHl = key;
       if (block) block.dataset.lang = language;
     });
@@ -1391,7 +1540,7 @@ function paintLiveHighlight() {
   const key = `${language}\0${source}`;
   if (layer.dataset.marklSrc !== key) {
     if (window.hljs && language && language !== 'text' && window.hljs.getLanguage(language)) {
-      layer.innerHTML = window.hljs.highlight(source, { language, ignoreIllegals: true }).value;
+      layer.innerHTML = highlightSource(source, language);
     } else {
       layer.textContent = source;
     }
@@ -1478,10 +1627,10 @@ function tableCellText(cell) {
 }
 
 function tableAvailableWidth(table) {
-  const host = table.parentElement;
-  if (!host) return 0;
-  const style = getComputedStyle(host);
-  return Math.max(0, host.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
+  const paper = table.closest('.vditor-reset') || table.parentElement;
+  if (!paper) return 0;
+  const style = getComputedStyle(paper);
+  return Math.max(0, paper.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
 }
 
 function preferredColumnWidths(table) {
@@ -1510,38 +1659,48 @@ function preferredColumnWidths(table) {
 function fitColumnWidths(preferred, available) {
   const count = preferred.length;
   if (!count || available <= 0) return preferred.slice();
-  const minWidth = Math.max(32, Math.min(56, Math.floor(available / Math.max(count * 1.4, 1))));
-  const cappedPref = preferred.map((width) => Math.max(width, minWidth));
-  const sum = cappedPref.reduce((total, width) => total + width, 0);
-  if (sum <= available) return cappedPref;
-  const minSum = minWidth * count;
-  if (minSum >= available) return cappedPref.map(() => available / count);
-  let low = minWidth;
-  let high = Math.max(...cappedPref, available);
-  for (let step = 0; step < 20; step += 1) {
-    const mid = (low + high) / 2;
-    const total = cappedPref.reduce((acc, width) => acc + Math.min(width, mid), 0);
-    if (total > available) high = mid;
-    else low = mid;
+  const minWidth = Math.max(48, Math.min(80, Math.floor(available / Math.max(count * 2, 1))));
+  const floors = preferred.map((width) => Math.max(width, minWidth));
+  let next = floors.slice();
+  const sum = next.reduce((total, width) => total + width, 0);
+
+  if (sum > available) {
+    const minSum = minWidth * count;
+    if (minSum >= available) {
+      next = next.map(() => available / count);
+    } else {
+      let low = minWidth;
+      let high = Math.max(...next, available);
+      for (let step = 0; step < 20; step += 1) {
+        const mid = (low + high) / 2;
+        const total = next.reduce((acc, width) => acc + Math.min(width, mid), 0);
+        if (total > available) high = mid;
+        else low = mid;
+      }
+      next = next.map((width) => Math.min(width, low));
+    }
   }
-  return cappedPref.map((width) => Math.min(width, low));
+
+  const used = next.reduce((total, width) => total + width, 0);
+  if (used <= 0) return next.map(() => available / count);
+  return next.map((width) => (width / used) * available);
 }
 
 function applyTableColumnWidths(table, widths, available) {
-  const total = widths.reduce((acc, width) => acc + width, 0);
-  const compact = total <= available - 0.5;
-  const nextWidth = compact ? `${Math.ceil(total)}px` : '100%';
+  const total = widths.reduce((acc, width) => acc + width, 0) || 1;
   const signature = `${widths.map((width) => Math.round(width)).join(',')}@${Math.round(available)}`;
-  if (table.dataset.marklCols === signature && table.style.width === nextWidth) return;
+  if (table.dataset.marklCols === signature && table.style.width === '100%') return;
   table.dataset.marklCols = signature;
   table.dataset.marklBalanced = '1';
-  table.style.width = nextWidth;
+  table.style.width = '100%';
+  table.style.minWidth = '100%';
+  table.style.maxWidth = '100%';
   const first = table.rows[0];
   if (!first) return;
   [...first.cells].forEach((cell, index) => {
     const width = widths[index];
     if (width == null) return;
-    cell.style.width = compact ? `${width}px` : `${(width / total) * 100}%`;
+    cell.style.width = `${(width / total) * 100}%`;
   });
 }
 
@@ -1693,14 +1852,11 @@ function currentTableContext() {
   return { cell, table, col: cellColumnIndex(cell), row: cell.parentElement };
 }
 
-function setTableColumnAlign(type) {
+function setTableCellAlign(type) {
   const ctx = currentTableContext();
   if (!ctx) return;
-  [...ctx.table.rows].forEach((row) => {
-    const target = row.cells[ctx.col];
-    if (target) target.setAttribute('align', type);
-  });
-  focusTableCell(ctx.table.rows[ctx.row.rowIndex]?.cells[ctx.col] || ctx.cell);
+  ctx.cell.setAttribute('align', type);
+  focusTableCell(ctx.cell);
   refreshTableToolbarState();
   notifyTableEdit();
 }
@@ -1828,9 +1984,9 @@ function handleTableToolbarAction(action) {
   if (action === 'toggle-insert') return toggleTableMenu('insert');
   if (action === 'toggle-more') return toggleTableMenu('more');
   closeTableMenus();
-  if (action === 'align-left') return setTableColumnAlign('left');
-  if (action === 'align-center') return setTableColumnAlign('center');
-  if (action === 'align-right') return setTableColumnAlign('right');
+  if (action === 'align-left') return setTableCellAlign('left');
+  if (action === 'align-center') return setTableCellAlign('center');
+  if (action === 'align-right') return setTableCellAlign('right');
   if (action === 'insert-row-above') return insertTableRow('above');
   if (action === 'insert-row-below') return insertTableRow('below');
   if (action === 'insert-col-left') return insertTableColumn('left');
@@ -1980,6 +2136,575 @@ async function formatActiveCode() {
   }
 }
 
+const findState = {
+  open: false,
+  replaceOpen: false,
+  caseSensitive: false,
+  query: '',
+  matches: [],
+  index: 0
+};
+
+const imageUrlAliases = new Map();
+let findRefreshTimer = 0;
+let imageResolveTimer = 0;
+let sessionTimer = 0;
+let launchHandled = false;
+const launchContextPromise = window.markl?.getLaunchContext?.() || Promise.resolve({ file: null });
+
+function readSession() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
+    return {
+      workspaceRoot: parsed.workspaceRoot || null,
+      filePath: parsed.filePath || null,
+      sidebarHidden: Boolean(parsed.sidebarHidden),
+      expandedPaths: Array.isArray(parsed.expandedPaths) ? parsed.expandedPaths : []
+    };
+  } catch {
+    return { workspaceRoot: null, filePath: null, sidebarHidden: false, expandedPaths: [] };
+  }
+}
+
+function persistSessionNow() {
+  if (state.restoringSession) return;
+  localStorage.setItem(SESSION_KEY, JSON.stringify({
+    workspaceRoot: state.workspaceRoot,
+    filePath: state.filePath,
+    sidebarHidden: document.body.classList.contains('sidebar-hidden'),
+    expandedPaths: [...state.expandedPaths],
+    at: Date.now()
+  }));
+}
+
+function persistSession() {
+  if (state.restoringSession) return;
+  window.clearTimeout(sessionTimer);
+  sessionTimer = window.setTimeout(persistSessionNow, 80);
+}
+
+function applySessionChrome() {
+  if (readSession().sidebarHidden) document.body.classList.add('sidebar-hidden');
+}
+
+function expandAncestors(filePath, rootPath) {
+  if (!filePath || !rootPath || !isPathInside(filePath, rootPath)) return;
+  let current = parentDirectory(filePath);
+  while (current && isPathInside(current, rootPath)) {
+    state.expandedPaths.add(current);
+    const parent = parentDirectory(current);
+    if (!parent || samePath(parent, current)) break;
+    current = parent;
+  }
+}
+
+function normalizeFileUrl(url) {
+  try {
+    return decodeURI(String(url || '')).replace(/\\/g, '/');
+  } catch {
+    return String(url || '');
+  }
+}
+
+function rememberImageAlias(fileUrl, relative) {
+  if (!fileUrl || !relative || /^(https?:|data:|blob:)/i.test(relative)) return;
+  imageUrlAliases.set(fileUrl, relative);
+  imageUrlAliases.set(normalizeFileUrl(fileUrl), relative);
+}
+
+function fileUrlToAbsolute(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'file:') return '';
+    let pathname = decodeURIComponent(parsed.pathname || '');
+    if (/^\/[A-Za-z]:/.test(pathname)) pathname = pathname.slice(1);
+    return pathname.replace(/\//g, pathSeparator(state.filePath || pathname));
+  } catch {
+    return '';
+  }
+}
+
+function absoluteToDocumentRelative(absPath) {
+  if (!state.filePath || !absPath) return null;
+  const normalize = (value) => String(value).replace(/[\\/]+/g, '/').replace(/\/$/, '');
+  const from = normalize(parentDirectory(state.filePath));
+  const to = normalize(absPath);
+  const fromKey = from.toLowerCase();
+  const toKey = to.toLowerCase();
+  if (toKey === fromKey) return './';
+  if (!toKey.startsWith(`${fromKey}/`)) return null;
+  return `./${to.slice(from.length + 1)}`;
+}
+
+function sanitizeImageMarkdown(markdown) {
+  if (!markdown || (!imageUrlAliases.size && !state.filePath) || !/file:/i.test(markdown)) return markdown;
+  return rewriteFileUrls(markdown, (url) => (
+    imageUrlAliases.get(url)
+    || imageUrlAliases.get(normalizeFileUrl(url))
+    || absoluteToDocumentRelative(fileUrlToAbsolute(url))
+    || null
+  ));
+}
+
+function scheduleImageResolve() {
+  window.clearTimeout(imageResolveTimer);
+  imageResolveTimer = window.setTimeout(() => {
+    resolveEditorImages().catch((error) => console.warn('解析图片失败：', error));
+  }, 80);
+}
+
+async function resolveEditorImages() {
+  if (!state.filePath || state.sourceMode) return;
+  const images = [...document.querySelectorAll('#editor img')];
+  if (!images.length) return;
+
+  const sources = images.map((image) => image.dataset.marklSrc || image.getAttribute('src') || '');
+  const resolved = await window.markl.resolveImages({ documentPath: state.filePath, sources });
+
+  images.forEach((image, index) => {
+    const item = resolved[index];
+    if (!item) return;
+    if (!image.dataset.marklSrc && item.relative) image.dataset.marklSrc = item.relative;
+    if (item.exists && item.fileUrl && !item.remote) {
+      rememberImageAlias(item.fileUrl, item.relative || image.dataset.marklSrc || item.src);
+      if (image.getAttribute('src') !== item.fileUrl) image.src = item.fileUrl;
+    }
+  });
+}
+
+function findOptions() {
+  return { caseSensitive: findState.caseSensitive };
+}
+
+function currentSelectionText() {
+  if (state.sourceMode) {
+    const { selectionStart, selectionEnd, value } = elements.sourceEditor;
+    if (selectionStart === selectionEnd) return '';
+    return value.slice(selectionStart, selectionEnd);
+  }
+  return window.getSelection()?.toString() || '';
+}
+
+function queryFromSelection() {
+  const selected = currentSelectionText().replace(/\r\n/g, '\n').split('\n')[0].trim();
+  return selected.slice(0, 200);
+}
+
+function updateFindCount() {
+  const { matches, index, query } = findState;
+  if (!query) {
+    elements.findCount.textContent = '';
+    elements.findCount.classList.remove('is-empty');
+  } else if (!matches.length) {
+    elements.findCount.textContent = '无结果';
+    elements.findCount.classList.add('is-empty');
+  } else {
+    const capped = matches.length >= FIND_MATCH_LIMIT ? `${FIND_MATCH_LIMIT}+` : String(matches.length);
+    elements.findCount.textContent = `${index + 1} / ${capped}`;
+    elements.findCount.classList.remove('is-empty');
+  }
+
+  const hasMatches = matches.length > 0;
+  elements.findPrev.disabled = !hasMatches;
+  elements.findNext.disabled = !hasMatches;
+  elements.replaceOne.disabled = !hasMatches;
+  elements.replaceAll.disabled = !hasMatches;
+}
+
+function collectFindMatches() {
+  findState.query = elements.findInput.value;
+  findState.matches = collectMatches(getMarkdown(), findState.query, findOptions());
+  if (!findState.matches.length) findState.index = 0;
+  else if (findState.index >= findState.matches.length) findState.index = findState.matches.length - 1;
+  updateFindCount();
+}
+
+function isSkippedFindHost(element) {
+  if (!element?.closest) return true;
+  if (element.closest('.language-popup, .table-toolbar, .find-bar, .markl-live-hl, .vditor-copy')) return true;
+  if (element.closest('.vditor-ir__marker')) return true;
+
+  const preview = element.closest('.vditor-ir__preview');
+  if (preview) {
+    const node = preview.closest('.vditor-ir__node');
+    if (node?.classList.contains('vditor-ir__node--expand')) return true;
+  }
+
+  const code = element.closest('[data-type="code-block"]');
+  if (code && !element.closest('.vditor-ir__preview') && !code.classList.contains('vditor-ir__node--expand')) {
+    return true;
+  }
+  return false;
+}
+
+function walkVisibleTextNodes(root, visit) {
+  if (!root) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
+      const host = node.parentElement;
+      if (isSkippedFindHost(host)) return NodeFilter.FILTER_REJECT;
+      if (host?.closest('[hidden]')) return NodeFilter.FILTER_REJECT;
+      const style = host ? window.getComputedStyle(host) : null;
+      if (style && (style.display === 'none' || style.visibility === 'hidden')) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  let node = walker.nextNode();
+  while (node) {
+    visit(node);
+    node = walker.nextNode();
+  }
+}
+
+function collectVisibleTextIndex(root) {
+  const pieces = [];
+  let value = '';
+  walkVisibleTextNodes(root, (node) => {
+    pieces.push({ node, start: value.length, end: value.length + node.nodeValue.length });
+    value += node.nodeValue;
+  });
+  return { value, pieces };
+}
+
+function locateTextIndex(pieces, index, preferEnd) {
+  for (const piece of pieces) {
+    if (index < piece.end || (index === piece.end && (preferEnd || index === piece.start))) {
+      return { node: piece.node, offset: Math.max(0, index - piece.start) };
+    }
+  }
+  const last = pieces[pieces.length - 1];
+  return last ? { node: last.node, offset: last.node.nodeValue.length } : null;
+}
+
+function rangeFromIndexes(pieces, start, end) {
+  const from = locateTextIndex(pieces, start, false);
+  const to = locateTextIndex(pieces, end, true);
+  if (!from || !to) return null;
+  const range = document.createRange();
+  range.setStart(from.node, Math.min(from.offset, from.node.nodeValue.length));
+  range.setEnd(to.node, Math.min(to.offset, to.node.nodeValue.length));
+  return range;
+}
+
+function selectSourceRange(start, end) {
+  const textarea = elements.sourceEditor;
+  textarea.focus();
+  textarea.setSelectionRange(start, end);
+  const styles = window.getComputedStyle(textarea);
+  const lineHeight = Number.parseFloat(styles.lineHeight) || 24;
+  const line = (textarea.value.slice(0, start).match(/\n/g) || []).length;
+  textarea.scrollTop = Math.max(0, line * lineHeight - 80);
+}
+
+function selectIrMatch(match, markdown) {
+  const root = getIrElement();
+  if (!root) return;
+  const query = markdown.slice(match.start, match.end);
+  if (!query) return;
+
+  const visible = collectVisibleTextIndex(root);
+  const visibleMatches = collectMatches(visible.value, query, findOptions());
+  let chosen = visibleMatches[Math.min(findState.index, Math.max(visibleMatches.length - 1, 0))];
+
+  if (visibleMatches.length !== findState.matches.length) {
+    const line = lineNumberAt(markdown, match.start);
+    const hint = visibleLineHint(markdown.split('\n')[line] || '');
+    const hintIndex = hint ? visible.value.toLowerCase().indexOf(hint.toLowerCase()) : -1;
+    if (hintIndex >= 0) {
+      const nearby = visibleMatches.find((item) => item.start >= hintIndex && item.start <= hintIndex + Math.max(hint.length, query.length) + 40)
+        || visibleMatches.find((item) => Math.abs(item.start - hintIndex) < 200);
+      if (nearby) chosen = nearby;
+    }
+  }
+
+  if (!chosen) {
+    const line = lineNumberAt(markdown, match.start);
+    const hint = visibleLineHint(markdown.split('\n')[line] || query);
+    if (hint) {
+      const nodes = [...root.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, th, pre, blockquote')];
+      const block = nodes.find((node) => (node.textContent || '').includes(hint) || (node.textContent || '').includes(query));
+      block?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    }
+    return;
+  }
+
+  const range = rangeFromIndexes(visible.pieces, chosen.start, chosen.end);
+  if (!range) return;
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  const host = range.startContainer.nodeType === Node.ELEMENT_NODE
+    ? range.startContainer
+    : range.startContainer.parentElement;
+  host?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+}
+
+function revealCurrentMatch() {
+  if (!findState.open || !findState.matches.length) return;
+  const markdown = getMarkdown();
+  const match = findState.matches[findState.index];
+  if (!match) return;
+  if (state.sourceMode) selectSourceRange(match.start, match.end);
+  else selectIrMatch(match, markdown);
+}
+
+function refreshFindMatches(options = {}) {
+  if (!findState.open) return;
+  const previous = findState.matches[findState.index];
+  collectFindMatches();
+  if (options.stay && previous) {
+    const nextIndex = findState.matches.findIndex((item) => item.start === previous.start);
+    if (nextIndex >= 0) findState.index = nextIndex;
+  } else if (options.reset) {
+    findState.index = 0;
+  }
+  updateFindCount();
+  if (options.reveal !== false && findState.matches.length) revealCurrentMatch();
+}
+
+function scheduleFindRefresh() {
+  if (!findState.open) return;
+  window.clearTimeout(findRefreshTimer);
+  findRefreshTimer = window.setTimeout(() => refreshFindMatches({ stay: true, reveal: false }), 80);
+}
+
+function setReplaceOpen(open) {
+  findState.replaceOpen = Boolean(open);
+  elements.replaceRow.classList.toggle('hidden', !findState.replaceOpen);
+  elements.findToggleReplace.classList.toggle('is-active', findState.replaceOpen);
+  elements.findToggleReplace.setAttribute('aria-expanded', String(findState.replaceOpen));
+  elements.findToggleReplace.title = findState.replaceOpen ? '隐藏替换' : '显示替换';
+}
+
+function openFindBar(options = {}) {
+  const selected = queryFromSelection();
+  findState.open = true;
+  elements.findBar.classList.remove('hidden');
+  if (options.replace) setReplaceOpen(true);
+  if (selected) elements.findInput.value = selected;
+  refreshFindMatches({ reset: Boolean(selected), reveal: true });
+  const focusTarget = options.replace && !selected ? elements.replaceInput : elements.findInput;
+  focusTarget.focus();
+  focusTarget.select();
+}
+
+function closeFindBar() {
+  if (!findState.open) return;
+  findState.open = false;
+  elements.findBar.classList.add('hidden');
+  restoreEditorFocus();
+}
+
+function findStep(step) {
+  if (!findState.open) openFindBar();
+  collectFindMatches();
+  if (!findState.matches.length) {
+    updateFindCount();
+    return;
+  }
+  findState.index = (findState.index + step + findState.matches.length) % findState.matches.length;
+  updateFindCount();
+  revealCurrentMatch();
+}
+
+function applyMarkdownEdit(next, options = {}) {
+  const wrap = elements.editorWrap;
+  const top = wrap.scrollTop;
+  if (state.sourceMode) {
+    elements.sourceEditor.value = next;
+  } else if (vditor) {
+    vditor.setValue(next, options.clearStack ?? false);
+  }
+  wrap.scrollTop = top;
+  recomputeDirty();
+  scheduleCodeHighlight();
+  scheduleOutlineRefresh();
+  scheduleImageResolve();
+}
+
+function replaceCurrentMatch() {
+  collectFindMatches();
+  const match = findState.matches[findState.index];
+  if (!match) return;
+  const replacement = elements.replaceInput.value;
+  const markdown = getMarkdown();
+
+  if (state.sourceMode) {
+    selectSourceRange(match.start, match.end);
+    if (!document.execCommand('insertText', false, replacement)) {
+      applyMarkdownEdit(replaceRange(markdown, match.start, match.end, replacement));
+    } else {
+      recomputeDirty();
+    }
+  } else {
+    applyMarkdownEdit(replaceRange(markdown, match.start, match.end, replacement));
+  }
+
+  refreshFindMatches({ stay: false });
+  if (findState.matches.length) {
+    findState.index = Math.min(findState.index, findState.matches.length - 1);
+    updateFindCount();
+    revealCurrentMatch();
+  }
+}
+
+function replaceAllCurrent() {
+  const query = elements.findInput.value;
+  if (!query) return;
+  const result = replaceAllMatches(getMarkdown(), query, elements.replaceInput.value, findOptions());
+  if (!result.count) return;
+  applyMarkdownEdit(result.text);
+  refreshFindMatches({ reset: true, reveal: false });
+}
+
+function isImageFile(file) {
+  if (!file) return false;
+  if (file.type && file.type.startsWith('image/')) return true;
+  return IMAGE_FILE_RE.test(file.name || '');
+}
+
+function filesFromDataTransfer(dataTransfer) {
+  if (!dataTransfer) return [];
+  const files = [];
+  if (dataTransfer.files?.length) {
+    files.push(...dataTransfer.files);
+  } else if (dataTransfer.items?.length) {
+    for (const item of dataTransfer.items) {
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+  }
+  return files.filter(isImageFile);
+}
+
+async function ensureDocumentOnDisk() {
+  if (state.filePath) {
+    const stat = await window.markl.statPath(state.filePath);
+    if (stat.exists) return true;
+  }
+  const ok = window.confirm('插入图片需要先保存文档。现在保存吗？');
+  if (!ok) return false;
+  return doSave();
+}
+
+function defaultPastedName(file) {
+  const original = file?.name || '';
+  if (original && original !== 'image.png' && original !== 'blob' && !/^image\.(png|jpe?g|gif)$/i.test(original)) {
+    return original;
+  }
+  const stamp = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  const ext = IMAGE_FILE_RE.test(original)
+    ? original.slice(original.lastIndexOf('.'))
+    : ({
+      'image/jpeg': '.jpg',
+      'image/gif': '.gif',
+      'image/webp': '.webp',
+      'image/svg+xml': '.svg',
+      'image/bmp': '.bmp'
+    }[file?.type] || '.png');
+  return `pasted-${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}-${pad(stamp.getHours())}${pad(stamp.getMinutes())}${pad(stamp.getSeconds())}${ext}`;
+}
+
+function insertMarkdownSnippet(snippet) {
+  if (state.sourceMode) {
+    const textarea = elements.sourceEditor;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const value = textarea.value;
+    textarea.value = `${value.slice(0, start)}${snippet}${value.slice(end)}`;
+    const caret = start + snippet.length;
+    textarea.focus();
+    textarea.setSelectionRange(caret, caret);
+    recomputeDirty();
+    scheduleFindRefresh();
+    return;
+  }
+  if (vditor?.insertValue) vditor.insertValue(snippet);
+  else document.execCommand('insertText', false, snippet);
+  scheduleImageResolve();
+  scheduleCodeHighlight();
+}
+
+async function insertImageFiles(files) {
+  const images = [...files].filter(isImageFile);
+  if (!images.length) return false;
+  if (!(await ensureDocumentOnDisk()) || !state.filePath) return true;
+
+  try {
+    const snippets = [];
+    for (const file of images) {
+      const saved = await window.markl.saveImage({
+        documentPath: state.filePath,
+        name: defaultPastedName(file),
+        mime: file.type,
+        bytes: await file.arrayBuffer()
+      });
+      rememberImageAlias(saved.fileUrl, saved.relative);
+      snippets.push(toMarkdownImage(imageAltFromName(file.name), saved.relative));
+    }
+    insertMarkdownSnippet(snippets.join('\n\n'));
+    if (isPathInside(state.filePath, state.workspaceRoot)) await refreshWorkspace();
+  } catch (error) {
+    showOperationError('插入图片', error);
+  }
+  return true;
+}
+
+function setDropActive(active) {
+  elements.editorWrap.classList.toggle('is-dropping', active);
+  if (elements.dropMask) elements.dropMask.setAttribute('aria-hidden', String(!active));
+}
+
+async function restoreWorkspaceFromSession(session, options = {}) {
+  if (!session.workspaceRoot) return false;
+  const stat = await window.markl.statPath(session.workspaceRoot);
+  if (!stat.exists || stat.kind !== 'directory') return false;
+  if (options.preferFile && !isPathInside(options.preferFile, session.workspaceRoot)) return false;
+  const payload = await window.markl.refreshWorkspace(session.workspaceRoot);
+  if (!payload) return false;
+  applyWorkspace(payload, { expandedPaths: session.expandedPaths });
+  rememberOpen('folder', payload.rootPath);
+  return true;
+}
+
+async function restoreOnStartup() {
+  state.restoringSession = true;
+  try {
+    const launch = await launchContextPromise;
+    if (launchHandled) return;
+    const session = readSession();
+    if (launch?.file) {
+      launchHandled = true;
+      loadContent(launch.file.filePath, launch.file.content);
+      await restoreWorkspaceFromSession(session, { preferFile: launch.file.filePath });
+      return;
+    }
+    await restoreWorkspaceFromSession(session);
+    if (session.filePath) {
+      const stat = await window.markl.statPath(session.filePath);
+      if (stat.exists && stat.kind === 'file') {
+        const result = await window.markl.readFile({ filePath: stat.path || session.filePath });
+        loadContent(result.filePath, result.content);
+      }
+    }
+  } catch (error) {
+    console.warn('恢复上次工作区失败：', error);
+  } finally {
+    state.restoringSession = false;
+    if (!state.filePath) markClean(getMarkdown());
+    persistSessionNow();
+    updateCounts();
+    renderHeadingTree();
+    scheduleImageResolve();
+    if (findState.open) refreshFindMatches({ stay: true, reveal: false });
+    focusEditor();
+  }
+}
+
 function createVditor() {
   if (!window.Vditor) {
     window.alert('编辑器未能加载，请重新启动 MarkL。');
@@ -2023,18 +2748,16 @@ function createVditor() {
     after() {
       state.editorReady = true;
       applyVditorTheme(localStorage.getItem('markl-theme') || 'light');
-      if (state.savedContent) vditor.setValue(state.savedContent, true);
-      else markClean(getMarkdown());
       decorateCodeBlocks();
       watchCodeHighlight();
       scheduleTableToolbar();
-      focusEditor();
-      updateCounts();
-      renderHeadingTree();
+      restoreOnStartup();
     },
     input() {
       recomputeDirty();
       scheduleCodeHighlight();
+      scheduleImageResolve();
+      scheduleFindRefresh();
     },
     keydown(event) {
       if (event.isComposing) return;
@@ -2067,7 +2790,56 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => toggle
 document.getElementById('status-sidebar-toggle').addEventListener('click', () => toggleSidebar());
 document.getElementById('sidebar-backdrop').addEventListener('click', () => toggleSidebar(false));
 elements.modeLabel.addEventListener('click', toggleMode);
-elements.sourceEditor.addEventListener('input', recomputeDirty);
+elements.sourceEditor.addEventListener('input', () => {
+  recomputeDirty();
+  scheduleFindRefresh();
+});
+
+elements.findInput.addEventListener('input', (event) => {
+  if (event.isComposing) return;
+  refreshFindMatches({ reset: true, reveal: true });
+});
+elements.findInput.addEventListener('compositionend', () => {
+  refreshFindMatches({ reset: true, reveal: true });
+});
+elements.findInput.addEventListener('keydown', (event) => {
+  if (event.isComposing) return;
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    findStep(event.shiftKey ? -1 : 1);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeFindBar();
+  }
+});
+elements.replaceInput.addEventListener('keydown', (event) => {
+  if (event.isComposing) return;
+  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && event.altKey) {
+    event.preventDefault();
+    replaceCurrentMatch();
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    findStep(event.shiftKey ? -1 : 1);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeFindBar();
+  }
+});
+elements.findCase.addEventListener('click', () => {
+  findState.caseSensitive = !findState.caseSensitive;
+  elements.findCase.classList.toggle('is-active', findState.caseSensitive);
+  elements.findCase.setAttribute('aria-pressed', String(findState.caseSensitive));
+  refreshFindMatches({ reset: true, reveal: true });
+});
+elements.findPrev.addEventListener('click', () => findStep(-1));
+elements.findNext.addEventListener('click', () => findStep(1));
+elements.findToggleReplace.addEventListener('click', () => {
+  setReplaceOpen(!findState.replaceOpen);
+  if (findState.replaceOpen) elements.replaceInput.focus();
+});
+elements.findClose.addEventListener('click', closeFindBar);
+elements.replaceOne.addEventListener('click', replaceCurrentMatch);
+elements.replaceAll.addEventListener('click', replaceAllCurrent);
 elements.languageQueryInput.addEventListener('input', () => {
   state.popup.query = elements.languageQueryInput.value;
   state.popup.items = filteredLanguages(state.popup.query);
@@ -2109,7 +2881,7 @@ elements.editorWrap.addEventListener('mousedown', (event) => {
   if (state.popup.visible && !event.target.closest('.language-popup')) {
     closeLanguagePopup({ restoreFocus: false });
   }
-  if (event.target.closest('.language-popup, .table-toolbar, textarea, button, input')) return;
+  if (event.target.closest('.language-popup, .table-toolbar, .find-bar, textarea, button, input')) return;
   releaseComposingLock();
   if (event.target.closest('.vditor-ir')) return;
   focusEditor();
@@ -2127,6 +2899,7 @@ elements.tableToolbar.addEventListener('click', (event) => {
 });
 
 window.markl.on('file:opened', async ({ filePath, content }) => {
+  launchHandled = true;
   if (await confirmDiscardIfDirty()) loadContent(filePath, content);
 });
 window.markl.on('menu:new', doNew);
@@ -2139,7 +2912,10 @@ window.markl.on('menu:toggle-mode', toggleMode);
 window.markl.on('menu:toggle-sidebar', () => toggleSidebar());
 window.markl.on('menu:theme', setTheme);
 window.markl.on('menu:format', formatActiveCode);
+window.markl.on('menu:find', () => openFindBar({ replace: false }));
+window.markl.on('menu:replace', () => openFindBar({ replace: true }));
 window.markl.on('app:before-close', async () => {
+  persistSessionNow();
   if (await confirmDiscardIfDirty()) window.markl.doClose();
 });
 
@@ -2164,25 +2940,49 @@ document.addEventListener('compositioncancel', () => {
 }, true);
 
 document.addEventListener('keydown', (event) => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+  const key = event.key.toLowerCase();
+  const modifier = event.ctrlKey || event.metaKey;
+  if (modifier && key === 's') {
     event.preventDefault();
     if (event.shiftKey) doSaveAs();
     else doSave();
+    return;
   }
-  if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 'l') {
+  if (modifier && key === 'f') {
+    event.preventDefault();
+    openFindBar({ replace: false });
+    return;
+  }
+  if (modifier && key === 'h') {
+    event.preventDefault();
+    openFindBar({ replace: true });
+    return;
+  }
+  if (event.key === 'F3') {
+    event.preventDefault();
+    findStep(event.shiftKey ? -1 : 1);
+    return;
+  }
+  if (event.ctrlKey && event.altKey && key === 'l') {
     event.preventDefault();
     formatActiveCode();
+    return;
   }
   if (event.key === 'Escape' && tableUi.menu) {
     event.preventDefault();
     closeTableMenus();
+    return;
+  }
+  if (event.key === 'Escape' && findState.open && !state.popup.visible) {
+    event.preventDefault();
+    closeFindBar();
   }
 }, true);
 
 document.addEventListener('keydown', (event) => {
   if (state.sourceMode || state.popup.visible || event.isComposing) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
-  if (document.activeElement?.closest?.('.tree-draft-row')) return;
+  if (document.activeElement?.closest?.('.tree-draft-row, #find-bar')) return;
   const ir = getIrElement();
   if (!ir) return;
 
@@ -2230,9 +3030,62 @@ elements.clearHistoryButton.addEventListener('click', () => {
   renderHistory();
 });
 
+function transferLooksLikeFiles(dataTransfer) {
+  if (!dataTransfer) return false;
+  const types = [...(dataTransfer.types || [])];
+  return types.includes('Files') || types.includes('application/x-moz-file');
+}
+
+document.addEventListener('paste', async (event) => {
+  const files = filesFromDataTransfer(event.clipboardData);
+  if (!files.length) return;
+  const target = event.target;
+  if (target?.closest?.('#find-bar, .tree-draft-row') || (target?.closest?.('input, textarea') && target !== elements.sourceEditor)) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  await insertImageFiles(files);
+}, true);
+
+window.addEventListener('dragover', (event) => {
+  if (!transferLooksLikeFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+});
+
+elements.editorWrap.addEventListener('dragenter', (event) => {
+  if (!transferLooksLikeFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  setDropActive(true);
+});
+
+elements.editorWrap.addEventListener('dragleave', (event) => {
+  if (event.relatedTarget && elements.editorWrap.contains(event.relatedTarget)) return;
+  setDropActive(false);
+});
+
+elements.editorWrap.addEventListener('drop', async (event) => {
+  event.preventDefault();
+  setDropActive(false);
+  const files = filesFromDataTransfer(event.dataTransfer);
+  if (files.length) await insertImageFiles(files);
+});
+
+window.addEventListener('drop', (event) => {
+  setDropActive(false);
+  if (transferLooksLikeFiles(event.dataTransfer) || filesFromDataTransfer(event.dataTransfer).length) {
+    event.preventDefault();
+  }
+});
+
+window.addEventListener('dragend', () => setDropActive(false));
+
+applySessionChrome();
 setTheme(localStorage.getItem('markl-theme') || 'light');
 updateTitle();
 updateCounts();
+updateFindCount();
 renderFileTree();
 renderHistory();
 setSidebarTab(localStorage.getItem(SIDEBAR_TAB_KEY) || 'files');
