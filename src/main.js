@@ -108,11 +108,20 @@ function readDocument(filePath) {
   return { filePath: resolved, content: fs.readFileSync(resolved, 'utf8') };
 }
 
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.focus();
+}
+
 function sendOpenFile(filePath) {
   try {
     mainWindow.webContents.send('file:opened', readDocument(filePath));
   } catch (error) {
     dialog.showErrorBox('无法打开文件', `${filePath}\n\n${error.message}`);
+    focusMainWindow();
   }
 }
 
@@ -232,13 +241,16 @@ function buildMenu() {
         },
         {
           label: '关于 MarkL',
-          click: () => dialog.showMessageBox(mainWindow, {
-            type: 'info',
-            title: '关于 MarkL',
-            message: 'MarkL 1.0.2',
-            detail: '面向中文用户的轻量 Markdown 编辑器。\n支持目录管理、实时预览与代码语法高亮。',
-            buttons: ['确定']
-          })
+          click: async () => {
+            await dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: '关于 MarkL',
+              message: 'MarkL 1.0.2',
+              detail: '面向中文用户的轻量 Markdown 编辑器。\n支持目录管理、实时预览与代码语法高亮。',
+              buttons: ['确定']
+            });
+            focusMainWindow();
+          }
         }
       ]
     }
@@ -256,6 +268,7 @@ ipcMain.handle('dialog:open', async () => {
       { name: '所有文件', extensions: ['*'] }
     ]
   });
+  focusMainWindow();
   if (result.canceled || !result.filePaths.length) return null;
   return readDocument(result.filePaths[0]);
 });
@@ -265,6 +278,7 @@ ipcMain.handle('dialog:open-folder', async () => {
     title: '选择 Markdown 文件夹',
     properties: ['openDirectory']
   });
+  focusMainWindow();
   if (result.canceled || !result.filePaths.length) return null;
   return workspacePayload(result.filePaths[0]);
 });
@@ -285,6 +299,7 @@ ipcMain.handle('dialog:save-as', async (_event, { defaultPath }) => {
       { name: '所有文件', extensions: ['*'] }
     ]
   });
+  focusMainWindow();
   return result.canceled || !result.filePath ? null : result.filePath;
 });
 
@@ -295,6 +310,7 @@ ipcMain.handle('dialog:export-html', async (_event, { defaultPath }) => {
     defaultPath: `${name}.html`,
     filters: [{ name: 'HTML 网页', extensions: ['html'] }]
   });
+  focusMainWindow();
   return result.canceled || !result.filePath ? null : result.filePath;
 });
 

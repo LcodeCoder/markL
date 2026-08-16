@@ -1,6 +1,6 @@
 {
   "name": "markl",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "MarkL - 面向中文用户的轻量 Markdown 编辑器",
   "main": "src/main.js",
   "author": "Haiyu Information",

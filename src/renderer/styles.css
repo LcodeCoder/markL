@@ -23,8 +23,16 @@
   --header-height: 46px;
   --status-height: 26px;
   --font-ui: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", sans-serif;
-  --font-content: "Cascadia Code", "JetBrains Mono", Consolas, "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
-  --font-code: "Cascadia Code", "JetBrains Mono", Consolas, "Microsoft YaHei UI", monospace;
+  --font-content: "Cascadia Code", "JetBrains Mono", Consolas, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  --font-code: "Cascadia Code", "JetBrains Mono", Consolas, "MarklZwsp", "Segoe UI", "Microsoft YaHei UI", monospace;
+}
+
+/* ZWSP/BOM must stay 0-width. Consolas/YaHei sometimes give them a full cell. */
+@font-face {
+  font-family: "MarklZwsp";
+  src: local("Segoe UI"), local("Arial"), local("Helvetica");
+  unicode-range: U+200B, U+FEFF;
+  font-weight: 100 900;
 }
 
 body.theme-dark {
@@ -769,6 +777,7 @@ body.sidebar-hidden #sidebar > * { pointer-events: none; opacity: 0; }
   padding: 36px 48px 160px !important;
   background: var(--editor-bg) !important;
   color: var(--text) !important;
+  caret-color: var(--text);
   font-family: var(--font-content) !important;
   font-size: 17px !important;
   line-height: 1.85 !important;
@@ -895,17 +904,32 @@ body.sidebar-hidden #sidebar > * { pointer-events: none; opacity: 0; }
 .vditor-ir [data-type="code-block"] .vditor-ir__preview,
 .vditor-ir [data-type="code-block"] pre {
   margin: 0 !important;
+  padding: 0 !important;
   background: transparent !important;
   border: 0 !important;
 }
 
 .vditor-ir [data-type="code-block"] code {
   display: block;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
   background: transparent !important;
   font-family: var(--font-code) !important;
   font-size: 13.5px !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0, "liga" 0, "dlig" 0;
   line-height: 1.65 !important;
-  white-space: pre-wrap;
+  letter-spacing: 0 !important;
+  word-spacing: 0 !important;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  white-space: pre-wrap !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  word-wrap: normal !important;
 }
 
 .vditor-ir [data-type="code-block"]:not(.vditor-ir__node--expand) .vditor-ir__marker--pre {
@@ -934,9 +958,24 @@ body.sidebar-hidden #sidebar > * { pointer-events: none; opacity: 0; }
   background: transparent;
   font-family: var(--font-code) !important;
   font-size: 13.5px !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0, "liga" 0, "dlig" 0;
   line-height: 1.65 !important;
-  white-space: pre-wrap;
-  word-break: break-word;
+  letter-spacing: 0 !important;
+  word-spacing: 0 !important;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  white-space: pre-wrap !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  word-wrap: normal !important;
+}
+
+.markl-live-hl span {
+  font-weight: inherit !important;
+  font-style: inherit !important;
 }
 
 .markl-live-hl .hljs,
