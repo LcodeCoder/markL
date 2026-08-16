@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="assets/logo-mark.png" alt="MarkL 标志" width="88" />
+  <img src="assets/logo-mark.png" alt="MarkL 标志" width="96" />
 </p>
 
 <p align="center">
-  <img src="assets/logo-wordmark.png" alt="MarkL" width="280" />
+  <img src="tab_logo.png" alt="MarkL" width="280" />
 </p>
 
 <h1 align="center">MarkL</h1>
@@ -292,11 +292,7 @@ Windows 下 `Ctrl` 对应 macOS 的 `Command`（源码里按 `CmdOrCtrl` 绑定�
 
 安装包已经放在 GitHub Release，不用再本地找 `dist`。
 
-| 文件 | 说明 | 下载 |
-| --- | --- | --- |
-| `MarkL.1.0.2.exe` | 绿色版，打开即可用 | [直链下载](https://github.com/LcodeCoder/markL/releases/download/1.0.2/MarkL.1.0.2.exe) |
-
-发布页：[1.0.2（Latest）](https://github.com/LcodeCoder/markL/releases/tag/1.0.2) · [全部 Release](https://github.com/LcodeCoder/markL/releases)
+发布页： [全部 Release](https://github.com/LcodeCoder/markL/releases)
 
 系统要求：
 
@@ -322,7 +318,7 @@ npm start
 npm run make-icon
 ```
 
-根目录的 `logo.png`（横版字标）和 `logo (1).png`（方标）是源文件，不要删。产物写到 `assets/`。
+根目录的 `tab_logo.png`（侧栏字标）和 `markL_logo.png`（应用图标）是源文件，不要删。产物写到 `assets/`。
 
 ## 打包
 
@@ -357,7 +353,7 @@ MarkL/
 │  └─ brand/                   # 介绍页使用的 Logo 副本
 ├─ scripts/
 │  ├─ dev-launch.js            # 开发启动：写成 MarkL.exe
-│  └─ make-icon.js             # 从根目录 Logo 生成多尺寸图标
+│  └─ make-icon.js             # 从 markL_logo / tab_logo 生成图标与字标
 ├─ src/
 │  ├─ main.js                  # 主进程：窗口、菜单、文件、工作区
 │  ├─ preload.js               # 限定 IPC
@@ -367,8 +363,8 @@ MarkL/
 │     ├─ text-search.js        # 查找替换
 │     └─ styles.css
 ├─ .github/workflows/build.yml
-├─ logo.png                    # 横版 Logo 源文件
-├─ logo (1).png                # 方标源文件
+├─ tab_logo.png                # 侧栏字标源文件
+├─ markL_logo.png              # 应用图标源文件
 ├─ DESIGN.md
 ├─ PRODUCT.md
 ├─ LICENSE

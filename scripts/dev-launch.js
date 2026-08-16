@@ -12,7 +12,7 @@ const stampFile = path.join(distDir, 'MarkL.exe.stamp');
 function stampValue() {
   const electronStat = fs.statSync(electronExe);
   const iconStat = fs.existsSync(iconIco) ? fs.statSync(iconIco) : { mtimeMs: 0 };
-  return `${electronStat.mtimeMs}:${iconStat.mtimeMs}:MarkL-v2`;
+  return `${electronStat.mtimeMs}:${iconStat.mtimeMs}:MarkL-v3`;
 }
 
 function needsRebuild() {

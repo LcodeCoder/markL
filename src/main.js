@@ -4,15 +4,49 @@ const fs = require('fs');
 const { pathToFileURL, fileURLToPath } = require('url');
 
 const APP_ID = 'com.haiyu.markl';
+const ICON_GENERATION = 3;
 const ICON_ICO = path.join(__dirname, '..', 'assets', 'icon.ico');
 
 app.setName('MarkL');
 app.setAppUserModelId(APP_ID);
 app.commandLine.appendSwitch('lang', 'zh-CN');
 
+function shellIconPath() {
+  if (app.isPackaged) return process.execPath;
+  const dest = path.join(app.getPath('userData'), `markl-shell-${ICON_GENERATION}.ico`);
+  try {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    if (!fs.existsSync(dest) || fs.statSync(dest).mtimeMs < fs.statSync(ICON_ICO).mtimeMs) {
+      fs.copyFileSync(ICON_ICO, dest);
+    }
+    return dest;
+  } catch {
+    return ICON_ICO;
+  }
+}
+
+function notifyShellIconsChanged() {
+  const { execFileSync } = require('child_process');
+  const script = path.join(__dirname, '..', 'scripts', 'refresh-shell-icons.ps1');
+  try {
+    if (fs.existsSync(script)) {
+      execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], { windowsHide: true });
+      return;
+    }
+  } catch {
+    // 继续尝试系统自带的刷新命令。
+  }
+  try {
+    const ie4 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'ie4uinit.exe');
+    execFileSync(ie4, ['-show'], { windowsHide: true });
+  } catch {
+    // Windows 图标缓存刷新失败时不影响启动。
+  }
+}
+
 function registerWindowsIdentity() {
   if (process.platform !== 'win32') return;
-  const iconForShell = app.isPackaged ? process.execPath : ICON_ICO;
+  const iconForShell = shellIconPath();
   const key = 'HKCU\\Software\\Classes\\AppUserModelId\\com.haiyu.markl';
   try {
     const { execFileSync } = require('child_process');
@@ -22,7 +56,10 @@ function registerWindowsIdentity() {
     console.warn('注册应用标识失败：', error.message);
   }
 
-  if (app.isPackaged) return;
+  if (app.isPackaged) {
+    notifyShellIconsChanged();
+    return;
+  }
 
   const appRoot = path.join(__dirname, '..');
   const programs = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs');
@@ -34,11 +71,12 @@ function registerWindowsIdentity() {
     args: `"${appRoot}"`,
     cwd: appRoot,
     appUserModelId: APP_ID,
-    icon: ICON_ICO,
+    icon: iconForShell,
     iconIndex: 0,
     description: 'MarkL'
   });
   if (!wrote) console.warn('写入开始菜单快捷方式失败：', shortcut);
+  notifyShellIconsChanged();
 }
 
 let mainWindow = null;

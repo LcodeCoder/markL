@@ -30,8 +30,8 @@ MarkL 是一款面向中文用户的 Windows 桌面 Markdown 编辑器。它将 
 
 ## 品牌资产
 
-- `logo.png`：带 MarkL 名称的横向品牌 Logo，用于目录栏顶部固定展示。
-- `logo (1).png`：无文字方形 Logo，用作应用、安装包和文件关联图标。
+- `tab_logo.png`：侧栏「目录 / 结构」上方的横向字标。
+- `markL_logo.png`：应用、安装包和文件关联图标。
 
 ## 设计原则
 

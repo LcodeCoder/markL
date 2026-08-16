@@ -137,11 +137,10 @@ img.document-mark {
 }
 
 .brand-logo {
-  width: 118px;
-  height: 32px;
+  width: 138px;
+  height: 40px;
   object-fit: contain;
   object-position: left center;
-  opacity: 0.92;
 }
 
 .sidebar-tabs {
