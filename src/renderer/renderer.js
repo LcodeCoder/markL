@@ -2786,6 +2786,15 @@ elements.githubLink.addEventListener('click', (event) => {
 });
 document.getElementById('open-button').addEventListener('click', doOpen);
 document.getElementById('save-button').addEventListener('click', doSave);
+document.getElementById('check-update-button').addEventListener('click', async () => {
+  try {
+    await window.markl.checkUpdate();
+  } catch (error) {
+    showOperationError('检查更新', error);
+  } finally {
+    restoreEditorFocus();
+  }
+});
 document.getElementById('sidebar-toggle').addEventListener('click', () => toggleSidebar());
 document.getElementById('status-sidebar-toggle').addEventListener('click', () => toggleSidebar());
 document.getElementById('sidebar-backdrop').addEventListener('click', () => toggleSidebar(false));

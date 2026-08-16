@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('markl', {
   saveImage: (options) => ipcRenderer.invoke('image:save', options),
   resolveImages: (options) => ipcRenderer.invoke('image:resolve', options),
   getLaunchContext: () => ipcRenderer.invoke('app:launch-context'),
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
 
   setTitle: (title) => ipcRenderer.send('app:set-title', title),
   doClose: () => ipcRenderer.send('app:do-close'),

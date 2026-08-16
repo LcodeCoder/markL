@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL, fileURLToPath } = require('url');
@@ -6,6 +6,9 @@ const { pathToFileURL, fileURLToPath } = require('url');
 const APP_ID = 'com.haiyu.markl';
 const ICON_GENERATION = 3;
 const ICON_ICO = path.join(__dirname, '..', 'assets', 'icon.ico');
+const GITHUB_REPO = 'LcodeCoder/markL';
+const RELEASES_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+const RELEASES_PAGE = `https://github.com/${GITHUB_REPO}/releases/latest`;
 
 app.setName('MarkL');
 app.setAppUserModelId(APP_ID);
@@ -130,6 +133,12 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
+  mainWindow.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      checkForUpdate({ silent: true }).catch(() => {});
+    }, 2500);
+  });
+
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url !== mainWindow.webContents.getURL()) event.preventDefault();
   });
@@ -171,6 +180,141 @@ function sendOpenFile(filePath) {
   } catch (error) {
     dialog.showErrorBox('无法打开文件', `${filePath}\n\n${error.message}`);
     focusMainWindow();
+  }
+}
+
+function compareVersions(left, right) {
+  const parse = (value) => String(value || '').replace(/^v/i, '').split(/[.+-]/).map((part) => Number.parseInt(part, 10) || 0);
+  const a = parse(left);
+  const b = parse(right);
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    const delta = (a[index] || 0) - (b[index] || 0);
+    if (delta !== 0) return delta > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+function updateStatePath() {
+  return path.join(app.getPath('userData'), 'update-state.json');
+}
+
+function readDismissedVersion() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(updateStatePath(), 'utf8'));
+    return parsed.dismissed || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDismissedVersion(version) {
+  fs.writeFileSync(updateStatePath(), JSON.stringify({ dismissed: version, at: Date.now() }), 'utf8');
+}
+
+function fetchLatestRelease() {
+  return new Promise((resolve, reject) => {
+    const request = net.request({ method: 'GET', url: RELEASES_API });
+    request.setHeader('User-Agent', `MarkL/${app.getVersion()}`);
+    request.setHeader('Accept', 'application/vnd.github+json');
+
+    const timer = setTimeout(() => {
+      request.abort();
+      reject(new Error('检查更新超时。'));
+    }, 12000);
+
+    request.on('response', (response) => {
+      let body = '';
+      response.on('data', (chunk) => {
+        body += chunk.toString('utf8');
+      });
+      response.on('end', () => {
+        clearTimeout(timer);
+        if (response.statusCode === 404) {
+          reject(new Error('还没有发布版本。'));
+          return;
+        }
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(`无法连接更新服务（${response.statusCode}）。`));
+          return;
+        }
+        try {
+          const data = JSON.parse(body);
+          const latest = String(data.tag_name || data.name || '').replace(/^v/i, '');
+          if (!latest) {
+            reject(new Error('更新信息无法解析。'));
+            return;
+          }
+          resolve({
+            latest,
+            url: /^https:\/\//i.test(data.html_url) ? data.html_url : RELEASES_PAGE
+          });
+        } catch {
+          reject(new Error('更新信息无法解析。'));
+        }
+      });
+    });
+    request.on('error', (error) => {
+      clearTimeout(timer);
+      reject(new Error(error?.message || '网络不可用。'));
+    });
+    request.end();
+  });
+}
+
+let updateCheckInFlight = false;
+
+async function checkForUpdate({ silent = false } = {}) {
+  if (!mainWindow || mainWindow.isDestroyed() || updateCheckInFlight) return;
+  updateCheckInFlight = true;
+  try {
+    const current = app.getVersion();
+    const { latest, url } = await fetchLatestRelease();
+    const newer = compareVersions(latest, current) > 0;
+
+    if (silent && (!newer || readDismissedVersion() === latest)) return;
+
+    if (!newer) {
+      if (!silent) {
+        await dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: '检查更新',
+          message: '已是最新版本',
+          detail: `当前版本 ${current}。`,
+          buttons: ['确定']
+        });
+        focusMainWindow();
+      }
+      return;
+    }
+
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '发现新版本',
+      message: `MarkL ${latest} 已发布`,
+      detail: `当前版本 ${current}。\n打开下载页获取新版本？`,
+      buttons: ['打开下载页', '稍后'],
+      defaultId: 0,
+      cancelId: 1
+    });
+    focusMainWindow();
+    if (result.response === 0) {
+      await shell.openExternal(url);
+    } else {
+      writeDismissedVersion(latest);
+    }
+  } catch (error) {
+    if (silent) return;
+    await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: '检查更新',
+      message: '暂时无法检查更新',
+      detail: error?.message || String(error),
+      buttons: ['确定']
+    });
+    focusMainWindow();
+  } finally {
+    updateCheckInFlight = false;
   }
 }
 
@@ -288,8 +432,12 @@ function buildMenu() {
       label: '帮助',
       submenu: [
         {
+          label: '检查更新…',
+          click: () => checkForUpdate({ silent: false })
+        },
+        {
           label: 'GitHub 仓库',
-          click: () => shell.openExternal('https://github.com/LcodeCoder/markL')
+          click: () => shell.openExternal(`https://github.com/${GITHUB_REPO}`)
         },
         {
           label: '关于 MarkL',
@@ -297,7 +445,7 @@ function buildMenu() {
             await dialog.showMessageBox(mainWindow, {
               type: 'info',
               title: '关于 MarkL',
-              message: 'MarkL 1.0.2',
+              message: `MarkL ${app.getVersion()}`,
               detail: '面向中文用户的轻量 Markdown 编辑器。\n支持目录管理、实时预览与代码语法高亮。',
               buttons: ['确定']
             });
@@ -647,6 +795,11 @@ ipcMain.on('app:do-close', () => {
 });
 
 ipcMain.on('app:set-title', (_event, title) => mainWindow?.setTitle(title));
+
+ipcMain.handle('update:check', async () => {
+  await checkForUpdate({ silent: false });
+  return true;
+});
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {

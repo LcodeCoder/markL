@@ -10,7 +10,7 @@
 
 <p align="center">
   面向中文用户的轻量 Markdown 编辑器<br />
-  Typora 式单栏即时渲染 · 文件树工作区 · 代码高亮
+  单栏即时渲染 · 文件树工作区 · 代码高亮
 </p>
 
 <p align="center">
@@ -97,7 +97,7 @@ MarkL 是序邻信息科技（xvlin Information）做的桌面 Markdown 编辑�
 
 ## 功能说明
 
-### 1. Typora 式即时渲染
+### 1. 单栏即时渲染
 
 默认不是「源码 | 预览」分栏，而是单栏边写边排：
 
@@ -111,7 +111,7 @@ MarkL 是序邻信息科技（xvlin Information）做的桌面 Markdown 编辑�
 
 ### 2. 代码块：语言标签、灰框、高亮、格式化
 
-写代码的路径刻意做成接近 Typora：
+写代码时边写边看到语言标签和高亮：
 
 1. 输入三个反引号 `` ``` ``
 2. 回车，弹出「代码语言」列表
@@ -286,7 +286,7 @@ Windows 下 `Ctrl` 对应 macOS 的 `Command`（源码里按 `CmdOrCtrl` 绑定�
 | 编辑 | 撤销 / 重做、剪切 / 复制 / 粘贴 / 删除、全选、查找、替换、格式化代码块 |
 | 视图 | 切换即时渲染 / 源码、显示/隐藏目录栏、重新加载、缩放、全屏 |
 | 主题 | 浅色主题、深色主题 |
-| 帮助 | GitHub 仓库、关于 MarkL |
+| 帮助 | 检查更新、GitHub 仓库、关于 MarkL |
 
 ## 下载与安装
 
@@ -376,7 +376,7 @@ MarkL/
 | 技术 | 用途 |
 | --- | --- |
 | [Electron](https://www.electronjs.org/) 32 | 桌面壳、原生对话框、菜单、文件关联 |
-| [Vditor](https://b3log.org/vditor) IR | Typora 式即时渲染 |
+| [Vditor](https://b3log.org/vditor) IR | 单栏即时渲染 |
 | highlight.js | 代码块关键字颜色 |
 | [js-beautify](https://github.com/beautifier/js-beautify) | `Ctrl + Alt + L` 格式化 |
 | [electron-builder](https://www.electron.build/) | NSIS / Portable / macOS dmg·zip |
@@ -391,6 +391,7 @@ MarkL/
 - 打开历史和上次工作区记在本机浏览器存储里，不是云同步
 - 粘贴或拖入的图片保存在文档旁的 `assets/`，不上传
 - 目录树有深度和数量上限；超大仓库请只打开子目录
+- 启动后会检查 GitHub Release；有新版本会提示。也可点顶栏或菜单「帮助 → 检查更新」。不会自动下载。
 - 当前正式安装包是 Windows x64；macOS 包需要 Mac 或 CI
 
 ## 贡献
