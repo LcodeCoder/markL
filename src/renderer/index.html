@@ -100,7 +100,7 @@
         <textarea id="source-editor" class="hidden" spellcheck="false" aria-label="Markdown 源码"></textarea>
         <div id="table-toolbar" class="table-toolbar hidden" role="toolbar" aria-label="表格工具">
           <div class="table-toolbar-group">
-            <button id="table-insert-button" type="button" data-table-action="toggle-insert" title="插入行或列" aria-label="插入行或列" aria-haspopup="menu" aria-expanded="false">
+            <button id="table-insert-button" type="button" data-table-action="toggle-insert" title="选择表格大小" aria-label="选择表格大小" aria-haspopup="dialog" aria-expanded="false">
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3.25 2A1.25 1.25 0 0 0 2 3.25v9.5A1.25 1.25 0 0 0 3.25 14h9.5A1.25 1.25 0 0 0 14 12.75v-9.5A1.25 1.25 0 0 0 12.75 2h-9.5ZM3.5 6.5h3v3h-3v-3Zm4.5 0h4.5v3H8v-3Zm-4.5 4.5h3v2.5H3.75a.25.25 0 0 1-.25-.25V11Zm4.5 0h4.5v2.25a.25.25 0 0 1-.25.25H8V11ZM6.5 3.5v1.5h-3V3.75c0-.138.112-.25.25-.25H6.5Zm1.5 0h4.25c.138 0 .25.112.25.25V5H8V3.5Z"/></svg>
             </button>
             <button type="button" data-table-action="align-left" title="当前单元格居左" aria-label="当前单元格居左">
@@ -121,11 +121,9 @@
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M6.15 2.35h3.7c.22 0 .42.15.48.36l.17.59H13a.7.7 0 0 1 0 1.4h-.4l-.58 6.72A1.7 1.7 0 0 1 10.33 13.3H5.67a1.7 1.7 0 0 1-1.69-1.88L3.4 4.7H3a.7.7 0 0 1 0-1.4h2.5l.17-.59a.5.5 0 0 1 .48-.36Zm.46 1.4-.08.25h2.94l-.08-.25H6.61ZM4.81 4.7l.56 6.54c.04.4.37.66.7.66h4.66c.33 0 .66-.26.7-.66L11.2 4.7H4.81Z"/></svg>
             </button>
           </div>
-          <div id="table-insert-menu" class="table-menu hidden" role="menu" aria-label="插入行或列">
-            <button type="button" role="menuitem" data-table-action="insert-row-above">在上方插入行</button>
-            <button type="button" role="menuitem" data-table-action="insert-row-below">在下方插入行</button>
-            <button type="button" role="menuitem" data-table-action="insert-col-left">在左侧插入列</button>
-            <button type="button" role="menuitem" data-table-action="insert-col-right">在右侧插入列</button>
+          <div id="table-insert-menu" class="table-menu table-size-picker hidden" role="dialog" aria-label="选择表格大小">
+            <div id="table-size-grid" class="table-size-grid" role="grid" aria-label="表格行列"></div>
+            <div class="table-size-label"><span id="table-size-text">1 x 1</span></div>
           </div>
           <div id="table-more-menu" class="table-menu table-menu-right hidden" role="menu" aria-label="更多表格操作">
             <button type="button" role="menuitem" data-table-action="delete-row">删除当前行</button>

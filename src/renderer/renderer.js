@@ -42,6 +42,23 @@ const HISTORY_KEY = 'markl-open-history';
 const HISTORY_LIMIT = 16;
 const SIDEBAR_TAB_KEY = 'markl-sidebar-tab';
 const SESSION_KEY = 'markl-session';
+const APPEARANCE_KEY = 'markl-appearance';
+const THEME_IDS = ['light', 'dark', 'sepia'];
+const FONT_STACKS = {
+  default: '"Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Segoe UI", sans-serif',
+  yahei: '"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif',
+  song: 'SimSun, "Songti SC", "Noto Serif SC", "Source Han Serif SC", serif',
+  kai: 'KaiTi, STKaiti, "Kaiti SC", "Noto Serif SC", serif',
+  fangsong: 'FangSong, STFangsong, "Fangsong SC", serif',
+  hei: 'SimHei, "Heiti SC", "Microsoft YaHei UI", sans-serif',
+  deng: 'DengXian, "Source Han Sans SC", "Microsoft YaHei UI", sans-serif'
+};
+const FONT_SIZES = {
+  small: '15.5px',
+  medium: '16.5px',
+  large: '18px',
+  xlarge: '20px'
+};
 const GITHUB_REPO_URL = 'https://github.com/LcodeCoder/markL';
 const IMAGE_FILE_RE = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
 
@@ -59,7 +76,8 @@ const state = {
   treeDraft: null,
   sourceMode: false,
   editorReady: false,
-  restoringSession: false
+  restoringSession: false,
+  appearance: { theme: 'light', font: 'default', fontSize: 'medium' }
 };
 
 const elements = {
@@ -95,6 +113,8 @@ const elements = {
   tableMoreButton: document.getElementById('table-more-button'),
   tableInsertMenu: document.getElementById('table-insert-menu'),
   tableMoreMenu: document.getElementById('table-more-menu'),
+  tableSizeGrid: document.getElementById('table-size-grid'),
+  tableSizeText: document.getElementById('table-size-text'),
   findBar: document.getElementById('find-bar'),
   findInput: document.getElementById('find-input'),
   findCount: document.getElementById('find-count'),
@@ -217,6 +237,7 @@ function releaseComposingLock() {
 
 function repairEditorCaret(options = {}) {
   if (state.sourceMode) return false;
+  if (isEditorComposing()) return false;
   if (state.popup.visible && !options.ignorePopup) return false;
   if (document.activeElement?.closest?.('.tree-draft-row, .tree-draft-input')) return false;
 
@@ -1202,23 +1223,61 @@ function startRootDocument() {
   });
 }
 
+function normalizeAppearance(value = {}) {
+  const theme = THEME_IDS.includes(value.theme) ? value.theme : 'light';
+  const font = FONT_STACKS[value.font] ? value.font : 'default';
+  const fontSize = FONT_SIZES[value.fontSize] ? value.fontSize : 'medium';
+  return { theme, font, fontSize };
+}
+
+function readStoredAppearance() {
+  try {
+    const raw = localStorage.getItem(APPEARANCE_KEY);
+    if (raw) return normalizeAppearance(JSON.parse(raw));
+  } catch {
+    // 旧版本只存了主题名。
+  }
+  return normalizeAppearance({ theme: localStorage.getItem('markl-theme') || 'light' });
+}
+
 function applyVditorTheme(theme) {
   if (!vditor) return;
   const dark = theme === 'dark';
   vditor.setTheme(
     dark ? 'dark' : 'classic',
     dark ? 'dark' : 'light',
-    dark ? 'native' : 'github',
+    dark ? 'github-dark-dimmed' : 'github',
     CONTENT_THEME_PATH
   );
 }
 
+function applyAppearance(appearance) {
+  const next = normalizeAppearance(appearance);
+  state.appearance = next;
+  document.body.classList.remove('theme-light', 'theme-dark', 'theme-sepia');
+  document.body.classList.add(`theme-${next.theme}`);
+  document.body.dataset.font = next.font;
+  document.body.dataset.fontSize = next.fontSize;
+  document.documentElement.style.setProperty('--font-content', FONT_STACKS[next.font]);
+  document.documentElement.style.setProperty('--content-size', FONT_SIZES[next.fontSize]);
+  applyVditorTheme(next.theme);
+  scheduleCodeHighlight();
+  scheduleTableBalance();
+}
+
+function persistAppearance() {
+  localStorage.setItem(APPEARANCE_KEY, JSON.stringify(state.appearance));
+  localStorage.setItem('markl-theme', state.appearance.theme);
+  window.markl.setAppearance?.(state.appearance);
+}
+
+function setAppearance(patch) {
+  applyAppearance({ ...state.appearance, ...patch });
+  persistAppearance();
+}
+
 function setTheme(theme) {
-  const selected = theme === 'dark' ? 'dark' : 'light';
-  document.body.classList.toggle('theme-dark', selected === 'dark');
-  document.body.classList.toggle('theme-light', selected === 'light');
-  applyVditorTheme(selected);
-  localStorage.setItem('markl-theme', selected);
+  setAppearance({ theme });
 }
 
 function toggleSidebar(force) {
@@ -1372,12 +1431,15 @@ const HIGHLIGHT_EXTRAS = {
       'Path', 'Paths', 'Files', 'File', 'Scanner', 'UUID', 'URL', 'URI',
       'BigDecimal', 'BigInteger', 'Date', 'Calendar', 'Locale', 'Pattern', 'Matcher',
       'Consumer', 'Function', 'Predicate', 'Supplier', 'Comparator',
-      'Override', 'Deprecated', 'SuppressWarnings', 'SafeVarargs', 'FunctionalInterface'
+      'Override', 'Deprecated', 'SuppressWarnings', 'SafeVarargs', 'FunctionalInterface',
+      'int', 'boolean', 'byte', 'char', 'double', 'float', 'long', 'short', 'void'
     ]),
     pascalType: true
   },
   csharp: {
     type: new Set([
+      'string', 'int', 'bool', 'byte', 'char', 'decimal', 'double', 'float', 'long',
+      'object', 'short', 'uint', 'ulong', 'ushort', 'void', 'var', 'dynamic',
       'String', 'Object', 'Console', 'List', 'Dictionary', 'HashSet', 'Queue', 'Stack',
       'IEnumerable', 'IList', 'IDictionary', 'ICollection', 'IReadOnlyList',
       'StringBuilder', 'Task', 'ValueTask', 'Action', 'Func', 'Predicate',
@@ -1523,14 +1585,30 @@ function firstVisibleCharRect(root) {
   return null;
 }
 
+function activeCodeBlock() {
+  return document.querySelector('[data-type="code-block"].vditor-ir__node--expand');
+}
+
+function setCodeIme(active) {
+  const block = activeCodeBlock();
+  const on = Boolean(active && block);
+  document.body.classList.toggle('is-ime-code', on);
+  document.querySelectorAll('[data-type="code-block"].is-ime').forEach((node) => {
+    if (node !== block) node.classList.remove('is-ime');
+  });
+  if (block) block.classList.toggle('is-ime', on);
+  const layer = elements.editorWrap?.querySelector('.markl-live-hl');
+  if (on && layer) layer.classList.add('hidden');
+}
+
 function paintLiveHighlight() {
-  const block = document.querySelector('[data-type="code-block"].vditor-ir__node--expand');
+  const block = activeCodeBlock();
   const pre = block?.querySelector('.vditor-ir__marker--pre');
   const code = pre?.querySelector('code');
   const layer = liveHighlightLayer();
-  if (!block || !pre || !code) {
+  if (!block || !pre || !code || isEditorComposing()) {
     layer.classList.add('hidden');
-    layer.dataset.marklSrc = '';
+    if (!block || !pre || !code) layer.dataset.marklSrc = '';
     return;
   }
 
@@ -1731,7 +1809,9 @@ function decorateCodeBlocks() {
   scheduleTableBalance();
 }
 
-const tableUi = { table: null, cell: null, menu: '' };
+const TABLE_PICKER_MIN = 10;
+const TABLE_PICKER_MAX = 20;
+const tableUi = { table: null, cell: null, menu: '', hoverCols: 0, hoverRows: 0 };
 let tableToolbarTimer = 0;
 
 function emptyTableCell(tag, align) {
@@ -1760,6 +1840,8 @@ function columnAlign(cell) {
 
 function closeTableMenus() {
   tableUi.menu = '';
+  tableUi.hoverCols = 0;
+  tableUi.hoverRows = 0;
   elements.tableInsertMenu.classList.add('hidden');
   elements.tableMoreMenu.classList.add('hidden');
   elements.tableInsertButton.setAttribute('aria-expanded', 'false');
@@ -1850,6 +1932,113 @@ function currentTableContext() {
   const table = cell?.closest('table') || (tableUi.table?.isConnected ? tableUi.table : null);
   if (!cell || !table) return null;
   return { cell, table, col: cellColumnIndex(cell), row: cell.parentElement };
+}
+
+function currentTableSize() {
+  const ctx = currentTableContext();
+  return {
+    cols: Math.max(1, ctx?.table.rows[0]?.cells.length || 1),
+    rows: Math.max(1, ctx?.table.rows.length || 1)
+  };
+}
+
+function highlightTableSizePicker(cols, rows) {
+  elements.tableSizeGrid.querySelectorAll('.table-size-cell').forEach((cell) => {
+    const col = Number(cell.dataset.col);
+    const row = Number(cell.dataset.row);
+    cell.classList.toggle('is-active', col <= cols && row <= rows);
+  });
+  elements.tableSizeText.textContent = `${cols} x ${rows}`;
+}
+
+function tablePickerViewSize() {
+  const size = currentTableSize();
+  return {
+    cols: Math.min(TABLE_PICKER_MAX, Math.max(TABLE_PICKER_MIN, size.cols)),
+    rows: Math.min(TABLE_PICKER_MAX, Math.max(TABLE_PICKER_MIN, size.rows))
+  };
+}
+
+function renderTableSizePicker() {
+  const view = tablePickerViewSize();
+  const grid = elements.tableSizeGrid;
+  if (grid.dataset.cols !== String(view.cols) || grid.dataset.rows !== String(view.rows)) {
+    grid.dataset.cols = String(view.cols);
+    grid.dataset.rows = String(view.rows);
+    grid.style.gridTemplateColumns = `repeat(${view.cols}, 14px)`;
+    const fragment = document.createDocumentFragment();
+    for (let row = 1; row <= view.rows; row += 1) {
+      for (let col = 1; col <= view.cols; col += 1) {
+        const cell = document.createElement('div');
+        cell.className = 'table-size-cell';
+        cell.dataset.col = String(col);
+        cell.dataset.row = String(row);
+        cell.setAttribute('role', 'gridcell');
+        fragment.appendChild(cell);
+      }
+    }
+    grid.replaceChildren(fragment);
+  }
+  const size = currentTableSize();
+  highlightTableSizePicker(tableUi.hoverCols || size.cols, tableUi.hoverRows || size.rows);
+}
+
+function resizeTable(targetCols, targetRows) {
+  const ctx = currentTableContext();
+  if (!ctx) return;
+  const table = ctx.table;
+  const cols = Math.max(1, Math.min(TABLE_PICKER_MAX, targetCols));
+  const rows = Math.max(1, Math.min(TABLE_PICKER_MAX, targetRows));
+  const currentCols = table.rows[0]?.cells.length || 0;
+  const currentRows = table.rows.length;
+  const originRow = ctx.row.rowIndex;
+  const originCol = ctx.col;
+  if (!currentCols) return;
+  if (cols === currentCols && rows === currentRows) {
+    closeTableMenus();
+    return;
+  }
+
+  if (cols > currentCols) {
+    [...table.rows].forEach((row, rowIndex) => {
+      const tag = rowIndex === 0 ? 'th' : 'td';
+      const align = row.cells[currentCols - 1]?.getAttribute('align') || (tag === 'th' ? 'center' : 'left');
+      let html = '';
+      for (let index = currentCols; index < cols; index += 1) html += emptyTableCell(tag, align);
+      row.insertAdjacentHTML('beforeend', html);
+    });
+  } else if (cols < currentCols) {
+    [...table.rows].forEach((row) => {
+      while (row.cells.length > cols) row.lastElementChild.remove();
+    });
+  }
+
+  if (rows > currentRows) {
+    const tbody = table.tBodies[0] || table.appendChild(document.createElement('tbody'));
+    const sample = table.rows[currentRows - 1];
+    const aligns = [...table.rows[0].cells].map((_, index) => (
+      sample?.cells[index]?.getAttribute('align') || 'left'
+    ));
+    let html = '';
+    for (let index = currentRows; index < rows; index += 1) {
+      html += `<tr>${aligns.map((align) => emptyTableCell('td', align)).join('')}</tr>`;
+    }
+    tbody.insertAdjacentHTML('beforeend', html);
+  } else if (rows < currentRows) {
+    for (let index = currentRows - 1; index >= rows; index -= 1) {
+      const row = table.rows[index];
+      const parent = row.parentElement;
+      row.remove();
+      if (parent.tagName === 'TBODY' && !parent.rows.length) parent.remove();
+    }
+  }
+
+  const focusRow = Math.min(Math.max(originRow, 0), table.rows.length - 1);
+  const focusCol = Math.min(Math.max(originCol, 0), table.rows[focusRow].cells.length - 1);
+  focusTableCell(table.rows[focusRow].cells[focusCol]);
+  notifyTableEdit();
+  showTableToolbar(tableUi.cell);
+  closeTableMenus();
 }
 
 function setTableCellAlign(type) {
@@ -1975,6 +2164,7 @@ function toggleTableMenu(name) {
   tableUi.menu = name;
   const menu = name === 'insert' ? elements.tableInsertMenu : elements.tableMoreMenu;
   const button = name === 'insert' ? elements.tableInsertButton : elements.tableMoreButton;
+  if (name === 'insert') renderTableSizePicker();
   menu.classList.remove('hidden');
   button.setAttribute('aria-expanded', 'true');
 }
@@ -2717,7 +2907,7 @@ function createVditor() {
     mode: 'ir',
     height: '100%',
     lang: 'zh_CN',
-    theme: document.body.classList.contains('theme-dark') ? 'dark' : 'classic',
+    theme: state.appearance.theme === 'dark' ? 'dark' : 'classic',
     icon: 'ant',
     tab: '    ',
     // placeholder: '输入 # 加空格开始标题；输入三个反引号后回车，选择代码语言。',
@@ -2741,13 +2931,13 @@ function createVditor() {
         style: 'github'
       },
       theme: {
-        current: document.body.classList.contains('theme-dark') ? 'dark' : 'light',
+        current: state.appearance.theme === 'dark' ? 'dark' : 'light',
         path: CONTENT_THEME_PATH
       }
     },
     after() {
       state.editorReady = true;
-      applyVditorTheme(localStorage.getItem('markl-theme') || 'light');
+      applyVditorTheme(state.appearance.theme);
       decorateCodeBlocks();
       watchCodeHighlight();
       scheduleTableToolbar();
@@ -2901,10 +3091,30 @@ elements.tableToolbar.addEventListener('mousedown', (event) => {
 });
 
 elements.tableToolbar.addEventListener('click', (event) => {
+  const sizeCell = event.target.closest('.table-size-cell');
+  if (sizeCell) {
+    event.preventDefault();
+    resizeTable(Number(sizeCell.dataset.col), Number(sizeCell.dataset.row));
+    return;
+  }
   const button = event.target.closest('[data-table-action]');
   if (!button) return;
   event.preventDefault();
   handleTableToolbarAction(button.dataset.tableAction);
+});
+
+elements.tableSizeGrid.addEventListener('mouseover', (event) => {
+  const cell = event.target.closest('.table-size-cell');
+  if (!cell) return;
+  tableUi.hoverCols = Number(cell.dataset.col);
+  tableUi.hoverRows = Number(cell.dataset.row);
+  renderTableSizePicker();
+});
+
+elements.tableSizeGrid.addEventListener('mouseleave', () => {
+  tableUi.hoverCols = 0;
+  tableUi.hoverRows = 0;
+  renderTableSizePicker();
 });
 
 window.markl.on('file:opened', async ({ filePath, content }) => {
@@ -2919,7 +3129,9 @@ window.markl.on('menu:save-as', doSaveAs);
 window.markl.on('menu:export-html', doExportHtml);
 window.markl.on('menu:toggle-mode', toggleMode);
 window.markl.on('menu:toggle-sidebar', () => toggleSidebar());
-window.markl.on('menu:theme', setTheme);
+window.markl.on('menu:theme', (theme) => setAppearance({ theme }));
+window.markl.on('menu:font', (font) => setAppearance({ font }));
+window.markl.on('menu:font-size', (fontSize) => setAppearance({ fontSize }));
 window.markl.on('menu:format', formatActiveCode);
 window.markl.on('menu:find', () => openFindBar({ replace: false }));
 window.markl.on('menu:replace', () => openFindBar({ replace: true }));
@@ -2936,16 +3148,21 @@ document.addEventListener('click', (event) => {
 
 document.addEventListener('compositionstart', () => {
   editorComposing = true;
+  setCodeIme(true);
 }, true);
 
 document.addEventListener('compositionend', () => {
   editorComposing = false;
   const ir = irController();
   if (ir) ir.composingLock = false;
+  setCodeIme(false);
+  scheduleCodeHighlight();
 }, true);
 
 document.addEventListener('compositioncancel', () => {
   releaseComposingLock();
+  setCodeIme(false);
+  scheduleCodeHighlight();
 }, true);
 
 document.addEventListener('keydown', (event) => {
@@ -3091,7 +3308,8 @@ window.addEventListener('drop', (event) => {
 window.addEventListener('dragend', () => setDropActive(false));
 
 applySessionChrome();
-setTheme(localStorage.getItem('markl-theme') || 'light');
+applyAppearance(readStoredAppearance());
+persistAppearance();
 updateTitle();
 updateCounts();
 updateFindCount();

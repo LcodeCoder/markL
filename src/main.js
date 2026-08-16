@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, shell, net } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell, net, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL, fileURLToPath } = require('url');
@@ -85,6 +85,54 @@ function registerWindowsIdentity() {
 let mainWindow = null;
 let launchDocument = null;
 let currentWorkspace = null;
+let currentAppearance = { theme: 'light', font: 'default', fontSize: 'medium' };
+
+const WINDOW_BG = {
+  light: '#f4f5f7',
+  dark: '#22262d',
+  sepia: '#e6e0d2'
+};
+const THEME_IDS = new Set(['light', 'dark', 'sepia']);
+const FONT_IDS = new Set(['default', 'yahei', 'song', 'kai', 'fangsong', 'hei', 'deng']);
+const FONT_SIZE_IDS = new Set(['small', 'medium', 'large', 'xlarge']);
+
+function appearancePath() {
+  return path.join(app.getPath('userData'), 'appearance.json');
+}
+
+function normalizeAppearance(value = {}) {
+  return {
+    theme: THEME_IDS.has(value.theme) ? value.theme : 'light',
+    font: FONT_IDS.has(value.font) ? value.font : 'default',
+    fontSize: FONT_SIZE_IDS.has(value.fontSize) ? value.fontSize : 'medium'
+  };
+}
+
+function readAppearance() {
+  try {
+    return normalizeAppearance(JSON.parse(fs.readFileSync(appearancePath(), 'utf8')));
+  } catch {
+    return normalizeAppearance({});
+  }
+}
+
+function writeAppearance(value) {
+  try {
+    fs.writeFileSync(appearancePath(), JSON.stringify(value), 'utf8');
+  } catch (error) {
+    console.warn('保存外观设置失败：', error.message);
+  }
+}
+
+function applyNativeAppearance(value, options = {}) {
+  currentAppearance = normalizeAppearance(value);
+  nativeTheme.themeSource = currentAppearance.theme === 'dark' ? 'dark' : 'light';
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setBackgroundColor(WINDOW_BG[currentAppearance.theme]);
+  }
+  if (options.persist) writeAppearance(currentAppearance);
+  if (options.rebuildMenu) buildMenu();
+}
 
 const DOCUMENT_RE = /\.(md|markdown|txt)$/i;
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico', '.avif']);
@@ -120,7 +168,7 @@ function createWindow() {
     height: 820,
     minWidth: 700,
     minHeight: 520,
-    backgroundColor: '#f4f5f7',
+    backgroundColor: WINDOW_BG[currentAppearance.theme],
     icon: ICON_ICO,
     title: 'MarkL',
     webPreferences: {
@@ -424,8 +472,96 @@ function buildMenu() {
     {
       label: '主题',
       submenu: [
-        { label: '浅色主题', click: () => mainWindow?.webContents.send('menu:theme', 'light') },
-        { label: '深色主题', click: () => mainWindow?.webContents.send('menu:theme', 'dark') }
+        {
+          label: '浅色',
+          type: 'radio',
+          checked: currentAppearance.theme === 'light',
+          click: () => mainWindow?.webContents.send('menu:theme', 'light')
+        },
+        {
+          label: '深色',
+          type: 'radio',
+          checked: currentAppearance.theme === 'dark',
+          click: () => mainWindow?.webContents.send('menu:theme', 'dark')
+        },
+        {
+          label: '护眼',
+          type: 'radio',
+          checked: currentAppearance.theme === 'sepia',
+          click: () => mainWindow?.webContents.send('menu:theme', 'sepia')
+        }
+      ]
+    },
+    {
+      label: '字体',
+      submenu: [
+        {
+          label: '默认',
+          type: 'radio',
+          checked: currentAppearance.font === 'default',
+          click: () => mainWindow?.webContents.send('menu:font', 'default')
+        },
+        {
+          label: '微软雅黑',
+          type: 'radio',
+          checked: currentAppearance.font === 'yahei',
+          click: () => mainWindow?.webContents.send('menu:font', 'yahei')
+        },
+        {
+          label: '宋体',
+          type: 'radio',
+          checked: currentAppearance.font === 'song',
+          click: () => mainWindow?.webContents.send('menu:font', 'song')
+        },
+        {
+          label: '楷体',
+          type: 'radio',
+          checked: currentAppearance.font === 'kai',
+          click: () => mainWindow?.webContents.send('menu:font', 'kai')
+        },
+        {
+          label: '仿宋',
+          type: 'radio',
+          checked: currentAppearance.font === 'fangsong',
+          click: () => mainWindow?.webContents.send('menu:font', 'fangsong')
+        },
+        {
+          label: '黑体',
+          type: 'radio',
+          checked: currentAppearance.font === 'hei',
+          click: () => mainWindow?.webContents.send('menu:font', 'hei')
+        },
+        {
+          label: '等线',
+          type: 'radio',
+          checked: currentAppearance.font === 'deng',
+          click: () => mainWindow?.webContents.send('menu:font', 'deng')
+        },
+        { type: 'separator' },
+        {
+          label: '较小',
+          type: 'radio',
+          checked: currentAppearance.fontSize === 'small',
+          click: () => mainWindow?.webContents.send('menu:font-size', 'small')
+        },
+        {
+          label: '标准',
+          type: 'radio',
+          checked: currentAppearance.fontSize === 'medium',
+          click: () => mainWindow?.webContents.send('menu:font-size', 'medium')
+        },
+        {
+          label: '较大',
+          type: 'radio',
+          checked: currentAppearance.fontSize === 'large',
+          click: () => mainWindow?.webContents.send('menu:font-size', 'large')
+        },
+        {
+          label: '更大',
+          type: 'radio',
+          checked: currentAppearance.fontSize === 'xlarge',
+          click: () => mainWindow?.webContents.send('menu:font-size', 'xlarge')
+        }
       ]
     },
     {
@@ -795,6 +931,9 @@ ipcMain.on('app:do-close', () => {
 });
 
 ipcMain.on('app:set-title', (_event, title) => mainWindow?.setTitle(title));
+ipcMain.on('appearance:set', (_event, payload) => {
+  applyNativeAppearance(payload, { persist: true, rebuildMenu: true });
+});
 
 ipcMain.handle('update:check', async () => {
   await checkForUpdate({ silent: false });
@@ -814,6 +953,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    applyNativeAppearance(readAppearance());
     const launchPath = extractFileArg(process.argv);
     if (launchPath) {
       try {

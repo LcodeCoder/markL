@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('markl', {
   checkUpdate: () => ipcRenderer.invoke('update:check'),
 
   setTitle: (title) => ipcRenderer.send('app:set-title', title),
+  setAppearance: (payload) => ipcRenderer.send('appearance:set', payload),
   doClose: () => ipcRenderer.send('app:do-close'),
 
   on: (channel, callback) => {
@@ -38,6 +39,8 @@ contextBridge.exposeInMainWorld('markl', {
       'menu:toggle-mode',
       'menu:toggle-sidebar',
       'menu:theme',
+      'menu:font',
+      'menu:font-size',
       'menu:format',
       'menu:find',
       'menu:replace',
