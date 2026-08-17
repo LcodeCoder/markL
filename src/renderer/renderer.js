@@ -112,6 +112,7 @@ const elements = {
   appDialogBody: document.getElementById('app-dialog-body'),
   appDialogOk: document.getElementById('app-dialog-ok'),
   appDialogCancel: document.getElementById('app-dialog-cancel'),
+  appDialogIcon: document.getElementById('app-dialog-icon'),
   languagePopup: document.getElementById('language-popup'),
   languageQueryInput: document.getElementById('language-query-input'),
   languageList: document.getElementById('language-list'),
@@ -402,6 +403,25 @@ function rewriteHistoryPath(oldPath, nextPath) {
   renderHistory();
 }
 
+function relativeTime(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - ts;
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return '刚刚';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} 小时前`;
+  const day = Math.floor(hr / 24);
+  if (day === 1) return '昨天';
+  if (day < 7) return `${day} 天前`;
+  const wk = Math.floor(day / 7);
+  if (wk < 5) return `${wk} 周前`;
+  const mo = Math.floor(day / 30);
+  if (mo < 12) return `${mo} 个月前`;
+  return `${Math.floor(mo / 12)} 年前`;
+}
+
 function renderHistory() {
   if (!elements.historyList) return;
   const items = readHistory();
@@ -437,7 +457,10 @@ function renderHistory() {
     const pathLine = document.createElement('span');
     pathLine.className = 'history-path';
     pathLine.textContent = parentDisplay(item.path) || item.path;
-    copy.append(name, pathLine);
+    const timeLine = document.createElement('span');
+    timeLine.className = 'history-time';
+    timeLine.textContent = relativeTime(item.at);
+    copy.append(name, pathLine, timeLine);
 
     openButton.append(item.kind === 'folder' ? folderIcon() : fileIcon(), copy);
     openButton.addEventListener('click', () => openHistoryItem(item));
@@ -505,7 +528,9 @@ function updateCounts() {
   const latinWords = (text
     .replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g, ' ')
     .match(/[A-Za-z0-9]+(?:['_-][A-Za-z0-9]+)*/g) || []).length;
-  elements.counts.textContent = `${cjk + latinWords} 字 · ${characters} 字符`;
+  const lines = text ? text.split('\n').length : 0;
+  const paragraphs = text ? text.split(/\n\s*\n/).filter((b) => b.trim().length > 0).length : 0;
+  elements.counts.textContent = (cjk + latinWords) + ' 字 · ' + characters + ' 字符 · ' + lines + ' 行 · ' + paragraphs + ' 段';
 }
 
 function markClean(content) {
@@ -561,7 +586,13 @@ function closeAppDialog(result) {
   });
 }
 
-function showAppDialog({ title, message, ok = '确定', cancel = '', danger = false } = {}) {
+const DIALOG_ICONS = {
+  info: '<svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 0 13A6.5 6.5 0 0 0 8 1.5ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm6.5-.25A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>',
+  warning: '<svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.32.437a.25.25 0 0 0-.44 0L1.255 12.862a.25.25 0 0 0 .22.368h12.05a.25.25 0 0 0 .22-.368ZM8.75 5.75a.75.75 0 0 0-1.5 0v2.5a.75.75 0 0 0 1.5 0v-2.5ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"/></svg>',
+  danger: '<svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>'
+};
+
+function showAppDialog({ title, message, ok = '确定', cancel = '', danger = false, type = '' } = {}) {
   return new Promise((resolve) => {
     if (!elements.appDialog) {
       resolve(false);
@@ -573,6 +604,11 @@ function showAppDialog({ title, message, ok = '确定', cancel = '', danger = fa
     elements.appDialogBody.textContent = message || '';
     elements.appDialogOk.textContent = ok;
     elements.appDialogOk.classList.toggle('is-danger', Boolean(danger));
+    if (elements.appDialogIcon) {
+      const iconType = type || (danger ? 'danger' : 'info');
+      elements.appDialogIcon.className = `app-dialog-icon is-${iconType}`;
+      elements.appDialogIcon.innerHTML = DIALOG_ICONS[iconType] || DIALOG_ICONS.info;
+    }
     if (cancel) {
       elements.appDialogCancel.textContent = cancel;
       elements.appDialogCancel.classList.remove('hidden');
@@ -695,6 +731,16 @@ async function doExportHtml() {
     const title = baseName(target).replace(/\.html$/i, '');
     const body = getHTML();
     const contentFont = FONT_STACKS[state.appearance.font] || FONT_STACKS.default;
+    const hljsCss = `
+.hljs{color:#24292e}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#d73a49}
+.hljs-title,.hljs-title.class_,.hljs-title.class_.inherited__,.hljs-title.function_{color:#6f42c1}
+.hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id,.hljs-variable{color:#005cc5}
+.hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#032f62}
+.hljs-built_in,.hljs-symbol{color:#e36209}
+.hljs-code,.hljs-comment,.hljs-formula{color:#6a737d}
+.hljs-name,.hljs-bullet,.hljs-deletion,.hljs-selector-pseudo,.hljs-selector-tag{color:#22863a}
+.hljs-addition,.hljs-section,.hljs-selector-class,.hljs-title.class_{color:#005cc5}
+.hljs-emphasis{font-style:italic}.hljs-strong{font-weight:700}`.trim();
     const fullHtml = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -703,10 +749,12 @@ async function doExportHtml() {
 <title>${escapeHtml(title)}</title>
 <style>
 body{max-width:760px;margin:48px auto;padding:0 24px 80px;font-family:${contentFont};line-height:1.8;color:#1a1f27;overflow-wrap:anywhere}
-pre{background:#eef1f5;padding:16px 16px 28px;border-radius:8px;overflow:auto;position:relative}code{font-family:"Cascadia Code",Consolas,monospace}pre code{background:none;padding:0}
+pre{background:#eef1f5;padding:16px 20px;border-radius:8px;overflow:auto}code{font-family:"Cascadia Code",Consolas,monospace;font-size:13.5px}pre code{background:none;padding:0}
 blockquote{color:#5c6674;border-left:3px solid #d5dbe3;margin-left:0;padding-left:16px}
 table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;word-break:break-word}th,td{border:1px solid #d5dbe3;padding:7px 12px;white-space:normal;overflow-wrap:break-word;word-break:break-word;vertical-align:top}img{max-width:100%}
+h1,h2{border-bottom:1px solid #e8eaed;padding-bottom:.3em}
 center,font,div,span,p,section,article{font-family:inherit}center{text-align:center}
+${hljsCss}
 </style>
 </head>
 <body>
@@ -745,11 +793,11 @@ function chevronIcon(expanded) {
 }
 
 function folderIcon() {
-  return svgNode('<svg class="tree-type-icon is-folder" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M2.25 4.25A1.75 1.75 0 0 1 4 2.5h2.2c.3 0 .58.12.78.34L8.1 4h3.9A1.75 1.75 0 0 1 13.75 5.75v5.5A1.75 1.75 0 0 1 12 13H4A1.75 1.75 0 0 1 2.25 11.25v-7Z"/></svg>');
+  return svgNode('<svg class="tree-type-icon is-folder" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M1.5 3.75A1.75 1.75 0 0 1 3.25 2h3.05c.36 0 .7.14.96.4L8.5 3.64h4.25A1.75 1.75 0 0 1 14.5 5.39v6.86A1.75 1.75 0 0 1 12.75 14h-9.5A1.75 1.75 0 0 1 1.5 12.25V3.75Z"/></svg>');
 }
 
 function fileIcon() {
-  return svgNode('<svg class="tree-type-icon is-file" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M4.25 1.75h5.1L12.75 5.2v8.05A1.5 1.5 0 0 1 11.25 14.75h-7A1.5 1.5 0 0 1 2.75 13.25v-10A1.5 1.5 0 0 1 4.25 1.75Zm4.6.7v2.9h2.85Z"/></svg>');
+  return svgNode('<svg class="tree-type-icon is-file" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M3.5 1.5h5.22L13 5.78V13.5A1.5 1.5 0 0 1 11.5 15H3.5A1.5 1.5 0 0 1 2 13.5v-10.5A1.5 1.5 0 0 1 3.5 1.5Zm4.55.9v3.28h3.28Z"/></svg>');
 }
 
 function splitFileName(name) {
@@ -2828,7 +2876,8 @@ function syncWorkspaceChrome() {
     elements.openFolderButton.classList.toggle('primary-button', !open);
     elements.openFolderButton.classList.toggle('text-button', open);
     elements.openFolderButton.classList.toggle('open-folder-quiet', open);
-    elements.openFolderButton.textContent = open ? '更换文件夹' : '打开文件夹';
+    const folderSvg = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M1.5 3.75A1.75 1.75 0 0 1 3.25 2h3.05c.36 0 .7.14.96.4L8.5 3.64h4.25A1.75 1.75 0 0 1 14.5 5.39v6.86A1.75 1.75 0 0 1 12.75 14h-9.5A1.75 1.75 0 0 1 1.5 12.25V3.75Z"/></svg>';
+    elements.openFolderButton.innerHTML = folderSvg + (open ? '更换文件夹' : '打开文件夹');
     elements.openFolderButton.title = open ? '换一个文件夹作为工作区' : '选择一个包含 Markdown 文档的文件夹';
   }
   if (elements.workspacePath && !open) {
@@ -3481,7 +3530,9 @@ function setUpdateBusy(busy) {
   if (!elements.checkUpdateButton) return;
   elements.checkUpdateButton.disabled = busy;
   elements.checkUpdateButton.setAttribute('aria-busy', busy ? 'true' : 'false');
-  elements.checkUpdateButton.textContent = busy ? '检查中…' : '检查更新';
+  const questionSvg = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 0 13A6.5 6.5 0 0 0 8 1.5ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm9 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM6.92 6.085c.081-.16.19-.299.34-.398.145-.097.371-.187.74-.187.28 0 .553.087.738.225A.613.613 0 0 1 9 6.25c0 .177-.04.264-.077.318a.956.956 0 0 1-.277.245c-.076.051-.158.1-.258.161l-.007.004a7.728 7.728 0 0 0-.313.208 2.49 2.49 0 0 0-.498.523A.75.75 0 0 0 7.5 8.25h1a.248.248 0 0 1-.022-.104c.012-.082.073-.235.32-.498a5.27 5.27 0 0 1 .216-.144l.002-.001.069-.044c.11-.072.235-.153.35-.238.206-.148.42-.334.574-.58.157-.25.241-.534.241-.891a2.11 2.11 0 0 0-.775-1.665C9.037 4.265 8.44 4 7.75 4a2.77 2.77 0 0 0-1.845.716A2.37 2.37 0 0 0 5.22 6.085a.75.75 0 1 0 1.7 0Z"/></svg>';
+  const spinSvg = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="animation:spin .8s linear infinite"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 0 0-6.5 6.5.75.75 0 0 1-1.5 0A8 8 0 1 1 8 16a.75.75 0 0 1 0-1.5A6.5 6.5 0 0 0 8 1.5Z"/></svg>';
+  elements.checkUpdateButton.innerHTML = (busy ? spinSvg : questionSvg) + (busy ? '检查中…' : '检查更新');
 }
 
 function setUpdateShown(el, shown) {

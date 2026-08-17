@@ -15,17 +15,15 @@
 
 <p align="center">
   <a href="docs/index.html">产品介绍页</a> ·
-  <a href="https://github.com/LcodeCoder/markL/releases/download/1.0.2/MarkL.1.0.2.exe">下载 Windows 绿色版</a> ·
+  <a href="https://github.com/LcodeCoder/markL/releases/latest">下载 Windows 绿色版</a> ·
   <a href="https://github.com/LcodeCoder/markL/releases/latest">GitHub Release</a> ·
   <a href="PRODUCT.md">产品说明</a> ·
   <a href="DESIGN.md">设计规范</a>
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-1.0.2-1674a6" />
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows-0f5e88" />
   <img alt="license" src="https://img.shields.io/badge/license-MIT-6a7381" />
-  <img alt="electron" src="https://img.shields.io/badge/Electron-32-1a1f27" />
 </p>
 
 ---
