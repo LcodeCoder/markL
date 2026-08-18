@@ -78,3 +78,55 @@ export function imageAltFromName(fileName) {
     .replace(/^pasted-\d{8}-\d{6}(?:-\d+)?$/i, '')
     .trim();
 }
+
+const DANGEROUS_HTML_TAGS = /^(script|iframe|object|embed|link|meta|base|form|svg|math|video|audio|source|track|frame|frameset|applet|html|head|body|style)$/i;
+
+function sanitizeHtmlFragment(text) {
+  let next = String(text || '');
+  next = next.replace(/<(script|iframe|object|embed|link|meta|base|form|svg|math|video|audio|style|frame|frameset|applet)(\s[^>]*)?>[\s\S]*?<\/\1>/gi, '');
+  next = next.replace(/<(script|iframe|object|embed|link|meta|base|form|svg|math|video|audio|style|frame|frameset|applet)(\s[^>]*)?\/?>/gi, '');
+  return next.replace(/<([a-zA-Z][\w:-]*)([^>]*)>/g, (_full, tag, attrs) => {
+    if (DANGEROUS_HTML_TAGS.test(tag)) return '';
+    const cleaned = String(attrs || '')
+      .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+      .replace(/\s(href|src|xlink:href|action|formaction)\s*=\s*(['"]?)\s*(javascript|vbscript):[^'"\s>]*/gi, '')
+      .replace(/\ssrc\s*=\s*(['"]?)\s*data:text\/html[^'"\s>]*/gi, '');
+    return `<${tag}${cleaned}>`;
+  });
+}
+
+export function sanitizeMarkdownHtml(markdown) {
+  const source = String(markdown || '');
+  const parts = [];
+  const skip = /```[\s\S]*?```|`[^`]*`/g;
+  let last = 0;
+  let match = skip.exec(source);
+  while (match) {
+    parts.push(sanitizeHtmlFragment(source.slice(last, match.index)));
+    parts.push(match[0]);
+    last = match.index + match[0].length;
+    match = skip.exec(source);
+  }
+  parts.push(sanitizeHtmlFragment(source.slice(last)));
+  return parts.join('');
+}
+
+export function visibleProseFromMarkdown(markdown) {
+  return String(markdown || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^>\s?/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
+    .replace(/[*_~]{1,3}/g, '')
+    .replace(/\|/g, ' ')
+    .replace(/[-:]{3,}/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}

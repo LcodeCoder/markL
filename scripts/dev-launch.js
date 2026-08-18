@@ -57,21 +57,25 @@ function brandExecutable() {
   fs.writeFileSync(stampFile, stampValue());
 }
 
+function launchEnv() {
+  return { ...process.env, NODE_ENV: process.env.NODE_ENV || 'development' };
+}
+
 if (process.platform === 'win32') {
   try {
     if (needsRebuild()) brandExecutable();
   } catch (error) {
     console.warn(`无法写入开发用 MarkL.exe，将回退到 Electron：${error.message}`);
-    spawn(electronExe, ['.'], { cwd: root, stdio: 'inherit', windowsHide: false }).on('exit', (code) => {
+    spawn(electronExe, ['.'], { cwd: root, stdio: 'inherit', windowsHide: false, env: launchEnv() }).on('exit', (code) => {
       process.exit(code ?? 0);
     });
     return;
   }
-  spawn(brandedExe, ['.'], { cwd: root, stdio: 'inherit', windowsHide: false }).on('exit', (code) => {
+  spawn(brandedExe, ['.'], { cwd: root, stdio: 'inherit', windowsHide: false, env: launchEnv() }).on('exit', (code) => {
     process.exit(code ?? 0);
   });
 } else {
-  spawn(electronExe, ['.'], { cwd: root, stdio: 'inherit' }).on('exit', (code) => {
+  spawn(electronExe, ['.'], { cwd: root, stdio: 'inherit', env: launchEnv() }).on('exit', (code) => {
     process.exit(code ?? 0);
   });
 }

@@ -13,30 +13,34 @@
 <body class="theme-light">
   <div id="app-shell">
     <aside id="sidebar" aria-label="文档目录">
+      <nav class="sidebar-rail" role="tablist" aria-label="侧栏视图">
+        <button id="tab-files" class="rail-button is-active" type="button" role="tab" aria-selected="true" aria-controls="files-panel" title="目录" aria-label="目录">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round" d="M2.65 5.5V4.32c0-.4.33-.72.74-.72h1.88c.23 0 .45.1.6.28L7.05 5.5h5.5c.48 0 .87.39.87.87v6.05c0 .55-.44 1-.98 1H3.56c-.54 0-.98-.45-.98-1V5.5h10.84"/></svg>
+        </button>
+        <button id="tab-outline" class="rail-button" type="button" role="tab" aria-selected="false" aria-controls="outline-panel" title="结构" aria-label="结构">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M3.2 4.25h9.6M3.2 8h9.6M3.2 11.75h6.4"/></svg>
+        </button>
+        <button id="tab-search" class="rail-button" type="button" role="tab" aria-selected="false" aria-controls="search-panel" title="搜索工作区" aria-label="搜索工作区">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.35"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="m10.2 10.2 3.15 3.15"/></svg>
+        </button>
+      </nav>
+
+      <div class="sidebar-body">
       <div class="brand-panel">
         <img src="../../assets/logo-wordmark.png" alt="MarkL" class="brand-logo" />
-      </div>
-
-      <div class="sidebar-tabs" role="tablist" aria-label="侧栏视图">
-        <button id="tab-files" class="sidebar-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="files-panel" title="工作区文件目录">
-          目录
-        </button>
-        <button id="tab-outline" class="sidebar-tab" type="button" role="tab" aria-selected="false" aria-controls="outline-panel" title="当前文档的标题结构">
-          结构
-        </button>
       </div>
 
       <div id="files-panel" class="sidebar-panel" role="tabpanel" aria-labelledby="tab-files">
         <div class="sidebar-actions" id="sidebar-actions">
           <button id="open-folder-button" class="primary-button" type="button" title="选择一个包含 Markdown 文档的文件夹">
-            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M1.5 3.75A1.75 1.75 0 0 1 3.25 2h3.05c.36 0 .7.14.96.4L8.5 3.64h4.25A1.75 1.75 0 0 1 14.5 5.39v6.86A1.75 1.75 0 0 1 12.75 14h-9.5A1.75 1.75 0 0 1 1.5 12.25V3.75Z"/></svg>
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="folder-line" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round" d="M2.65 5.5V4.32c0-.4.33-.72.74-.72h1.88c.23 0 .45.1.6.28L7.05 5.5h5.5c.48 0 .87.39.87.87v6.05c0 .55-.44 1-.98 1H3.56c-.54 0-.98-.45-.98-1V5.5h10.84"/></svg>
             打开文件夹
           </button>
           <button id="new-tree-button" class="icon-button hidden" type="button" title="新建文档" aria-label="新建文档">
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8 2.75a.75.75 0 0 1 .75.75v3.75H12.5a.75.75 0 0 1 0 1.5H8.75V12.5a.75.75 0 0 1-1.5 0V8.75H3.5a.75.75 0 0 1 0-1.5h3.75V3.5A.75.75 0 0 1 8 2.75Z"/></svg>
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M8 3.35v9.3M3.35 8h9.3"/></svg>
           </button>
           <button id="refresh-tree-button" class="icon-button hidden" type="button" title="刷新目录" aria-label="刷新目录">
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M3.2 8a4.8 4.8 0 0 1 8.14-3.4l.76-.76A.7.7 0 0 1 13.3 4.3v2.5a.6.6 0 0 1-.6.6H10.2a.7.7 0 0 1-.5-1.2l.7-.7A3.4 3.4 0 1 0 11.4 9.7a.7.7 0 1 1 1.24.64A4.8 4.8 0 0 1 3.2 8Z"/></svg>
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M3.3 8a4.7 4.7 0 0 1 7.95-3.35l.75-.75M12.75 2.7v2.85h-2.85M12.7 8a4.7 4.7 0 0 1-7.95 3.35l-.75.75M3.25 13.3V10.45h2.85"/></svg>
           </button>
         </div>
 
@@ -57,7 +61,7 @@
               打开历史
             </button>
           <button id="clear-history-button" class="history-clear hidden" type="button" title="清空打开历史">
-            <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path fill="currentColor" d="m4.2 3.2 3.8 3.8 3.8-3.8.9.9L8.9 8l3.8 3.8-.9.9L8 8.9l-3.8 3.8-.9-.9L7.1 8 3.3 4.2z"/></svg>
+            <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M4.4 4.4 11.6 11.6M11.6 4.4 4.4 11.6"/></svg>
             清空
           </button>
           </div>
@@ -69,10 +73,19 @@
         <nav id="heading-tree" class="heading-tree" aria-label="文档标题结构"></nav>
       </div>
 
+      <div id="search-panel" class="sidebar-panel hidden" role="tabpanel" aria-labelledby="tab-search">
+        <div class="workspace-search-bar">
+          <input id="workspace-search-input" class="workspace-search-input" type="text" placeholder="搜索文件名或正文" autocomplete="off" spellcheck="false" />
+        </div>
+        <div id="workspace-search-results" class="workspace-search-results" aria-label="搜索结果"></div>
+      </div>
+
       <div class="sidebar-footer">
         <span id="workspace-path">.md · .markdown · .txt</span>
       </div>
+      </div>
     </aside>
+    <div id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="调整目录栏宽度" tabindex="0"></div>
 
     <div id="sidebar-backdrop" aria-hidden="true"></div>
 
@@ -80,7 +93,7 @@
       <header id="document-header">
         <div class="document-identity">
           <button id="sidebar-toggle" class="icon-button" type="button" title="显示或隐藏目录栏" aria-label="显示或隐藏目录栏">
-            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M2.5 4.25h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Zm0 3h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Zm0 3h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Z"/></svg>
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M2.8 4.25h10.4M2.8 8h10.4M2.8 11.75h10.4"/></svg>
           </button>
           <div class="document-name-group">
             <div class="document-title-row">
@@ -92,20 +105,19 @@
         </div>
         <div class="header-actions">
           <button id="new-button" class="icon-text-button" type="button" title="新建文档（Ctrl+N）">
-            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M9.25 1.75H4A1.75 1.75 0 0 0 2.25 3.5v9A1.75 1.75 0 0 0 4 14.25h8A1.75 1.75 0 0 0 13.75 12.5V6.25L9.25 1.75Zm-.5 1.5v3h3l-3-3ZM4 3.25h3.25v2.5a1.5 1.5 0 0 0 1.5 1.5h2.5v5.25a.25.25 0 0 1-.25.25H4a.25.25 0 0 1-.25-.25v-9A.25.25 0 0 1 4 3.25Z"/></svg>
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round" d="M3.7 2.65h4.35L12.1 6.7v6.15c0 .55-.45 1-1 1H3.7c-.55 0-1-.45-1-1V3.65c0-.55.45-1 1-1Z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round" d="M8 2.75v3.7h3.85M5.15 10.05h5.7"/></svg>
             新建
           </button>
           <button id="open-button" class="icon-text-button" type="button" title="打开文件（Ctrl+O）">
-            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M2 3.75A1.75 1.75 0 0 1 3.75 2h2.2c.3 0 .58.12.78.34L7.85 3.5H12.25A1.75 1.75 0 0 1 14 5.25v6A1.75 1.75 0 0 1 12.25 13H3.75A1.75 1.75 0 0 1 2 11.25V3.75Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-6a.25.25 0 0 0-.25-.25H7.5L6.3 3.5H3.75Z"/></svg>
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round" d="M2.65 5.5V4.32c0-.4.33-.72.74-.72h1.88c.23 0 .45.1.6.28L7.05 5.5h5.5c.48 0 .87.39.87.87v6.05c0 .55-.44 1-.98 1H3.56c-.54 0-.98-.45-.98-1V5.5h10.84"/></svg>
             打开
           </button>
           <button id="save-button" class="accent-icon-button" type="button" title="保存（Ctrl+S）">
-            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M11.78 2.22a.75.75 0 0 1 .22.53v10.5a.75.75 0 0 1-.75.75H4.75a.75.75 0 0 1-.75-.75V3.75L5.5 2h5.75a.75.75 0 0 1 .53.22ZM5 3.5v2.25a.5.5 0 0 0 .5.5h5a.5.5 0 0 0 .5-.5V3.5H5Zm.5 5a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5Z"/></svg>
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M3.25 3.25h7.15L12.75 5.6v7.15c0 .55-.45 1-1 1h-7.5c-.55 0-1-.45-1-1v-8.5c0-.55.45-1 1-1Z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M5.15 3.35v2.55h5.15V3.35M5.45 9.35h5.1M5.45 11.25h3.15"/></svg>
             保存
           </button>
-          <button id="check-update-button" class="icon-text-button update-button" type="button" title="检查是否有新版本">
-            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 0 13A6.5 6.5 0 0 0 8 1.5ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm9 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM6.92 6.085c.081-.16.19-.299.34-.398.145-.097.371-.187.74-.187.28 0 .553.087.738.225A.613.613 0 0 1 9 6.25c0 .177-.04.264-.077.318a.956.956 0 0 1-.277.245c-.076.051-.158.1-.258.161l-.007.004a7.728 7.728 0 0 0-.313.208 2.49 2.49 0 0 0-.498.523A.75.75 0 0 0 7.5 8.25h1a.248.248 0 0 1-.022-.104c.012-.082.073-.235.32-.498a5.27 5.27 0 0 1 .216-.144l.002-.001.069-.044c.11-.072.235-.153.35-.238.206-.148.42-.334.574-.58.157-.25.241-.534.241-.891a2.11 2.11 0 0 0-.775-1.665C9.037 4.265 8.44 4 7.75 4a2.77 2.77 0 0 0-1.845.716A2.37 2.37 0 0 0 5.22 6.085a.75.75 0 1 0 1.7 0Z"/></svg>
-            检查更新
+          <button id="check-update-button" class="icon-button update-button" type="button" title="检查更新" aria-label="检查更新">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M3.3 8a4.7 4.7 0 0 1 7.95-3.35l.75-.75M12.75 2.7v2.85h-2.85M12.7 8a4.7 4.7 0 0 1-7.95 3.35l-.75.75M3.25 13.3V10.45h2.85"/></svg>
           </button>
         </div>
       </header>
@@ -255,21 +267,66 @@
           <input id="quick-open-input" class="quick-open-input" type="text" placeholder="打开工作区里的文档" autocomplete="off" spellcheck="false" />
           <div id="quick-open-list" class="quick-open-list" role="listbox" aria-label="匹配的文档"></div>
         </div>
-        <div id="drop-mask" class="drop-mask" aria-hidden="true">将图片放到文档中</div>
+        <div id="format-menu" class="format-menu hidden" role="menu" aria-label="文字格式">
+          <div class="format-menu-row">
+            <button type="button" data-format="cut" title="剪切" aria-label="剪切">
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M5.15 6.7 12.4 12.6M5.15 9.3 12.4 3.4"/><circle cx="4.15" cy="4.35" r="1.7" fill="none" stroke="currentColor" stroke-width="1.35"/><circle cx="4.15" cy="11.65" r="1.7" fill="none" stroke="currentColor" stroke-width="1.35"/></svg>
+            </button>
+            <button type="button" data-format="copy" title="复制" aria-label="复制">
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M5.4 4.4h7.1v8.3H5.4z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M3.5 3.4V2.7h7.1"/></svg>
+            </button>
+            <button type="button" data-format="paste" title="粘贴" aria-label="粘贴">
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M5.2 4.3h5.6v9H5.2z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round" d="M6.4 4.3V3.4h3.2v.9"/></svg>
+            </button>
+            <span class="format-menu-gap"></span>
+            <button type="button" class="format-letter" data-format="bold" title="加粗" aria-label="加粗"><span>B</span></button>
+            <button type="button" class="format-letter format-italic" data-format="italic" title="斜体" aria-label="斜体"><span>I</span></button>
+            <button type="button" class="format-letter format-strike" data-format="strike" title="删除线" aria-label="删除线"><span>S</span></button>
+            <button type="button" data-format="code" title="行内代码" aria-label="行内代码">
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M5.55 4.15 2.7 8l2.85 3.85M10.45 4.15 13.3 8l-2.85 3.85"/></svg>
+            </button>
+            <button type="button" data-format="link" title="链接" aria-label="链接">
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M6.7 9.3 9.3 6.7M7.15 5.15l.85-.85a2.2 2.2 0 1 1 3.1 3.1l-.85.85M8.85 10.85l-.85.85a2.2 2.2 0 1 1-3.1-3.1l.85-.85"/></svg>
+            </button>
+          </div>
+          <div class="format-menu-row">
+            <button type="button" class="format-letter" data-format="h1" title="一级标题" aria-label="一级标题"><span>H1</span></button>
+            <button type="button" class="format-letter" data-format="h2" title="二级标题" aria-label="二级标题"><span>H2</span></button>
+            <button type="button" class="format-letter" data-format="h3" title="三级标题" aria-label="三级标题"><span>H3</span></button>
+            <button type="button" data-format="quote" title="引用" aria-label="引用">
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M3.2 3.6h3.3v5.1H4.4L3.2 11.4V3.6Zm6.3 0h3.3v5.1h-2.1L9.5 11.4V3.6Z"/></svg>
+            </button>
+            <span class="format-menu-gap"></span>
+            <button type="button" data-format="ul" title="无序列表" aria-label="无序列表">
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3.2 4.15h1.3v1.3H3.2zm0 3.2h1.3v1.3H3.2zm0 3.2h1.3v1.3H3.2z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M6.5 4.8h6.3M6.5 8h6.3M6.5 11.2h6.3"/></svg>
+            </button>
+            <button type="button" data-format="ol" title="有序列表" aria-label="有序列表">
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3.05 3.55h1.7v.85H3.85v.15h.7v.75h-.7v.2h.95v.85H3.05zm0 4.55h1.7v.8H3.85V9.1h.9v.8h-1.7zm0 3.15h1.7v.8H3.85v.2h.9v.8H3.05z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M6.6 4.8h6.2M6.6 8h6.2M6.6 11.2h6.2"/></svg>
+            </button>
+            <button type="button" data-format="task" title="任务列表" aria-label="任务列表">
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M3.15 3.35h3.4v3.4h-3.4z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="m3.55 5.05 1.05 1.05 1.7-1.85M8.2 4.8h4.7M3.2 10.9h9.7"/></svg>
+            </button>
+            <span class="format-menu-gap"></span>
+            <button type="button" data-format="clear" title="清除格式" aria-label="清除格式">
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M4.2 12.6h7.6M6.1 12.4 8.7 3.5h1.15L7.2 12.4M3.4 7.6h9.3"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="drop-mask" class="drop-mask" aria-hidden="true">放到这里打开文档或插入图片</div>
       </section>
 
       <footer id="statusbar">
         <div class="status-group">
           <button id="status-sidebar-toggle" type="button" title="显示或隐藏目录栏">
-            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M2.5 4.25h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Zm0 3h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Zm0 3h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Z"/></svg>
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M2.8 4.25h10.4M2.8 8h10.4M2.8 11.75h10.4"/></svg>
             目录
           </button>
           <span id="save-status">已保存</span>
         </div>
         <div class="status-group status-right">
-          <button id="mode-label" type="button" title="切换即时渲染与 Markdown 源码">
-            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M10.78 3.47a.75.75 0 0 0-1.06 0L4.47 8.72a.75.75 0 0 0 0 1.06l1.5 1.5a.75.75 0 0 0 1.06 0l.72-.72.72.72a.75.75 0 0 0 1.06 0l1.5-1.5a.75.75 0 0 0 0-1.06L9.72 8l1.06-1.06a.75.75 0 0 0 0-1.06l-.47-.47 1.06-1.06a.75.75 0 0 0-1.06-1.06L10.78 3.47Z"/></svg>
-            即时渲染
+          <button id="mode-label" type="button" title="即时渲染，点击查看 Markdown 源码" aria-label="即时渲染，点击查看 Markdown 源码">
+            <svg class="mode-ir" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round" d="M4.35 2.7h4.1L11.7 6v6.35c0 .5-.4.9-.9.9H4.35c-.5 0-.9-.4-.9-.9V3.6c0-.5.4-.9.9-.9Z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round" d="M8.4 2.8v3.05h3.05M5.45 9.15h5.1M5.45 11.2h3.4"/></svg>
+            <svg class="mode-source" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M5.55 4.15 2.7 8l2.85 3.85M10.45 4.15 13.3 8l-2.85 3.85"/></svg>
           </button>
           <span id="encoding-label">UTF-8</span>
           <span id="counts">0 字 · 0 字符</span>

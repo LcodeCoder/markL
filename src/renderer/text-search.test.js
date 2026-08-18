@@ -6,7 +6,9 @@ import {
   visibleLineHint,
   toMarkdownImage,
   rewriteFileUrls,
-  imageAltFromName
+  imageAltFromName,
+  sanitizeMarkdownHtml,
+  visibleProseFromMarkdown
 } from './text-search.js';
 
 function assert(condition, message) {
@@ -36,5 +38,21 @@ const rewritten = rewriteFileUrls(
   (url) => (url.includes('a.png') ? './assets/a.png' : null)
 );
 assert(rewritten === '![x](./assets/a.png)', `rewrite failed: ${rewritten}`);
+
+const cleaned = sanitizeMarkdownHtml('<center>安全</center><script>alert(1)</script><img src=x onerror="steal()">');
+assert(cleaned.includes('<center>安全</center>'), 'center should remain');
+assert(!/script/i.test(cleaned), 'script tags should be stripped');
+assert(!/onerror/i.test(cleaned), 'event handlers should be stripped');
+assert(!sanitizeMarkdownHtml('<iframe src="https://evil"></iframe>'), 'iframe should be stripped');
+const fenced = sanitizeMarkdownHtml('```html\n<script>alert(1)</script>\n```\n<img src=x onerror="x">');
+assert(fenced.includes('<script>alert(1)</script>'), 'fenced script sample should stay');
+assert(!/onerror/i.test(fenced), 'HTML outside fences should still be cleaned');
+
+const prose = visibleProseFromMarkdown('# 标题\n\n这是一段 [链接](./a.md) 和 `code`。\n\n```js\nconst x = 1;\n```\n');
+assert(prose.includes('标题'), 'heading text should remain');
+assert(prose.includes('链接'), 'link label should remain');
+assert(!prose.includes('```'), 'fences should be removed');
+assert(!prose.includes('const x'), 'code block body should be removed');
+assert(!prose.includes('./a.md'), 'link target should be removed');
 
 console.log('text-search tests passed');

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, shell, net, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell, net, nativeTheme, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL, fileURLToPath } = require('url');
@@ -90,7 +90,7 @@ let currentAppearance = { theme: 'light', font: 'default', fontSize: 'medium' };
 const WINDOW_BG = {
   light: '#f4f5f7',
   dark: '#22262d',
-  sepia: '#e6e0d2'
+  sepia: '#e8dfcc'
 };
 const THEME_IDS = new Set(['light', 'dark', 'sepia']);
 const FONT_IDS = new Set(['default', 'yahei', 'song', 'kai', 'fangsong', 'hei', 'deng']);
@@ -124,6 +124,63 @@ function writeAppearance(value) {
   }
 }
 
+function windowStatePath() {
+  return path.join(app.getPath('userData'), 'window-state.json');
+}
+
+function readWindowState() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(windowStatePath(), 'utf8'));
+    if (!parsed || typeof parsed.width !== 'number' || typeof parsed.height !== 'number') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeWindowState(value) {
+  try {
+    fs.writeFileSync(windowStatePath(), JSON.stringify(value), 'utf8');
+  } catch (error) {
+    console.warn('保存窗口位置失败：', error.message);
+  }
+}
+
+function isVisibleOnAnyDisplay(bounds) {
+  const displays = screen.getAllDisplays();
+  const x = Number(bounds.x);
+  const y = Number(bounds.y);
+  const width = Number(bounds.width) || 200;
+  const height = Number(bounds.height) || 200;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  return displays.some((display) => {
+    const area = display.workArea;
+    return x < area.x + area.width - 80
+      && x + width > area.x + 80
+      && y < area.y + area.height - 80
+      && y + height > area.y + 40;
+  });
+}
+
+function currentWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const isMaximized = mainWindow.isMaximized();
+  const bounds = isMaximized ? mainWindow.getNormalBounds() : mainWindow.getBounds();
+  return { ...bounds, isMaximized };
+}
+
+let windowStateTimer = 0;
+
+function persistWindowState() {
+  const state = currentWindowState();
+  if (state) writeWindowState(state);
+}
+
+function schedulePersistWindowState() {
+  if (windowStateTimer) clearTimeout(windowStateTimer);
+  windowStateTimer = setTimeout(persistWindowState, 200);
+}
+
 function applyNativeAppearance(value, options = {}) {
   currentAppearance = normalizeAppearance(value);
   nativeTheme.themeSource = currentAppearance.theme === 'dark' ? 'dark' : 'light';
@@ -135,7 +192,47 @@ function applyNativeAppearance(value, options = {}) {
 }
 
 const DOCUMENT_RE = /\.(md|markdown|txt)$/i;
+const WRITEABLE_RE = /\.(md|markdown|txt|html)$/i;
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico', '.avif']);
+const IMAGE_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+  '.avif': 'image/avif'
+};
+const authorizedWrites = new Set();
+
+function authorizeWritePath(filePath) {
+  if (!filePath) return;
+  authorizedWrites.add(path.resolve(filePath).toLowerCase());
+}
+
+function isInsideCurrentWorkspace(filePath) {
+  if (!currentWorkspace || !filePath) return false;
+  const resolved = path.resolve(filePath);
+  const root = path.resolve(currentWorkspace);
+  const relative = path.relative(root, resolved);
+  return !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function assertAuthorizedWrite(filePath) {
+  if (!filePath) throw new Error('缺少文件路径。');
+  const resolved = path.resolve(filePath);
+  if (!WRITEABLE_RE.test(resolved)) {
+    throw new Error('只能写入 Markdown、文本或 HTML 文件。');
+  }
+  if (authorizedWrites.has(resolved.toLowerCase())) return resolved;
+  if (DOCUMENT_RE.test(resolved) && isInsideCurrentWorkspace(resolved)) {
+    authorizeWritePath(resolved);
+    return resolved;
+  }
+  throw new Error('不允许写入该路径。');
+}
 const MIME_IMAGE_EXT = {
   'image/png': '.png',
   'image/jpeg': '.jpg',
@@ -163,9 +260,10 @@ function extractFileArg(argv) {
 }
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
+  const saved = readWindowState();
+  const windowOptions = {
+    width: saved?.width || 1280,
+    height: saved?.height || 820,
     minWidth: 700,
     minHeight: 520,
     backgroundColor: WINDOW_BG[currentAppearance.theme],
@@ -177,9 +275,18 @@ function createWindow() {
       nodeIntegration: false,
       spellcheck: true
     }
-  });
+  };
+  if (saved && isVisibleOnAnyDisplay(saved)) {
+    windowOptions.x = saved.x;
+    windowOptions.y = saved.y;
+  }
+
+  mainWindow = new BrowserWindow(windowOptions);
+  if (saved?.isMaximized) mainWindow.maximize();
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.on('resize', schedulePersistWindowState);
+  mainWindow.on('move', schedulePersistWindowState);
 
   mainWindow.webContents.once('did-finish-load', () => {
     setTimeout(() => {
@@ -192,6 +299,7 @@ function createWindow() {
   });
 
   mainWindow.on('close', (event) => {
+    persistWindowState();
     if (!mainWindow.__forceClose) {
       event.preventDefault();
       mainWindow.webContents.send('app:before-close');
@@ -201,6 +309,7 @@ function createWindow() {
   mainWindow.on('closed', () => {
     closeWatcher(workspaceWatcher);
     closeWatcher(fileWatcher);
+    stopFilePoll();
     workspaceWatcher = null;
     fileWatcher = null;
     mainWindow = null;
@@ -215,6 +324,7 @@ function createWindow() {
 function readDocument(filePath) {
   const resolved = path.resolve(filePath);
   if (!DOCUMENT_RE.test(resolved)) throw new Error('仅支持 Markdown 或文本文件。');
+  authorizeWritePath(resolved);
   return { filePath: resolved, content: fs.readFileSync(resolved, 'utf8') };
 }
 
@@ -477,11 +587,21 @@ let fileWatcher = null;
 let watchWorkspaceRoot = null;
 let watchFilePath = null;
 let fsNotifyTimer = 0;
+let filePollTimer = 0;
+let lastPolledMtime = 0;
 const pendingFsPaths = new Set();
 
 function noteOwnWrite(targetPath) {
   if (!targetPath) return;
-  ownWrites.set(path.resolve(targetPath).toLowerCase(), Date.now());
+  const resolved = path.resolve(targetPath);
+  ownWrites.set(resolved.toLowerCase(), Date.now());
+  if (watchFilePath && resolved.toLowerCase() === path.resolve(watchFilePath).toLowerCase()) {
+    try {
+      lastPolledMtime = fs.statSync(resolved).mtimeMs;
+    } catch {
+      // 自己写入后立刻读不到也没关系，轮询会再补。
+    }
+  }
 }
 
 function isOwnWrite(targetPath) {
@@ -543,26 +663,84 @@ function startWorkspaceWatch(rootPath) {
   }
 }
 
+function isWatchedFileName(filename, filePath) {
+  if (!filename || !filePath) return false;
+  const target = path.basename(filePath).toLowerCase();
+  const name = String(filename).toLowerCase();
+  if (name === target) return true;
+  return name.startsWith(`${target}.`) || name.startsWith(`${target}~`) || name === `~${target}`;
+}
+
+function readMtime(filePath) {
+  try {
+    return fs.statSync(filePath).mtimeMs || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function stopFilePoll() {
+  if (filePollTimer) {
+    clearInterval(filePollTimer);
+    filePollTimer = 0;
+  }
+  lastPolledMtime = 0;
+}
+
+function startFilePoll(filePath) {
+  stopFilePoll();
+  if (!filePath) return;
+  lastPolledMtime = readMtime(filePath);
+  filePollTimer = setInterval(() => {
+    if (!watchFilePath || isOwnWrite(watchFilePath)) return;
+    const mtime = readMtime(watchFilePath);
+    if (!mtime) {
+      if (lastPolledMtime) queueFsNotify(watchFilePath);
+      return;
+    }
+    if (lastPolledMtime && mtime > lastPolledMtime + 4) {
+      lastPolledMtime = mtime;
+      queueFsNotify(watchFilePath);
+      return;
+    }
+    lastPolledMtime = mtime;
+  }, 400);
+}
+
 function startFileWatch(filePath) {
   closeWatcher(fileWatcher);
   fileWatcher = null;
   watchFilePath = filePath || null;
-  if (!filePath || !fs.existsSync(filePath)) return;
-  if (watchWorkspaceRoot && isPathInsideWatch(filePath, watchWorkspaceRoot)) return;
-  try {
-    fileWatcher = fs.watch(filePath, { persistent: true }, () => {
-      queueFsNotify(filePath);
-    });
-    fileWatcher.on('error', () => {});
-  } catch {
-    fileWatcher = null;
-  }
-}
+  stopFilePoll();
+  if (!filePath) return;
 
-function isPathInsideWatch(filePath, rootPath) {
-  const file = path.resolve(filePath).toLowerCase();
-  const root = path.resolve(rootPath).toLowerCase();
-  return file === root || file.startsWith(`${root}${path.sep}`);
+  const directory = path.dirname(filePath);
+  if (fs.existsSync(directory)) {
+    try {
+      fileWatcher = fs.watch(directory, { persistent: true }, (_event, filename) => {
+        if (filename && !isWatchedFileName(filename, filePath) && shouldIgnoreWatchName(filename)) return;
+        if (!filename || isWatchedFileName(filename, filePath)) {
+          queueFsNotify(filePath);
+        }
+      });
+      fileWatcher.on('error', () => {});
+    } catch {
+      fileWatcher = null;
+    }
+  }
+
+  if (!fileWatcher && fs.existsSync(filePath)) {
+    try {
+      fileWatcher = fs.watch(filePath, { persistent: true }, () => {
+        queueFsNotify(filePath);
+      });
+      fileWatcher.on('error', () => {});
+    } catch {
+      fileWatcher = null;
+    }
+  }
+
+  startFilePoll(filePath);
 }
 
 function draftFilePath() {
@@ -612,6 +790,7 @@ function buildMenu() {
         { label: '另存为…', accelerator: 'CmdOrCtrl+Shift+S', click: send('menu:save-as') },
         { type: 'separator' },
         { label: '导出 HTML…', click: send('menu:export-html') },
+        { label: '打印…', accelerator: 'CmdOrCtrl+Shift+P', click: send('menu:print') },
         { type: 'separator' },
         { role: 'quit', label: '退出 MarkL' }
       ]
@@ -631,6 +810,7 @@ function buildMenu() {
         { type: 'separator' },
         { label: '查找', accelerator: 'CmdOrCtrl+F', click: send('menu:find') },
         { label: '替换', accelerator: 'CmdOrCtrl+H', click: send('menu:replace') },
+        { label: '在文件夹中查找', accelerator: 'CmdOrCtrl+Shift+F', click: send('menu:workspace-search') },
         { type: 'separator' },
         { label: '格式化代码块', accelerator: 'Ctrl+Alt+L', click: send('menu:format') }
       ]
@@ -647,7 +827,7 @@ function buildMenu() {
         { role: 'zoomOut', label: '缩小' },
         { type: 'separator' },
         { role: 'togglefullscreen', label: '切换全屏' },
-        ...(process.env.NODE_ENV === 'development'
+        ...((!app.isPackaged || process.env.NODE_ENV === 'development')
           ? [{ type: 'separator' }, { role: 'toggleDevTools', label: '开发者工具' }]
           : [])
       ]
@@ -799,6 +979,96 @@ ipcMain.handle('workspace:refresh', async (_event, rootPath) => {
   return workspacePayload(target);
 });
 
+function toWorkspaceRelative(rootPath, filePath) {
+  const relative = path.relative(rootPath, filePath).split(path.sep).join('/');
+  return relative || path.basename(filePath);
+}
+
+ipcMain.handle('workspace:search', async (_event, { rootPath, query }) => {
+  const needle = String(query || '').trim();
+  const root = path.resolve(rootPath || currentWorkspace || '');
+  if (!needle || !root || !fs.existsSync(root)) return { names: [], contents: [] };
+
+  const find = needle.toLowerCase();
+  const names = [];
+  const contents = [];
+  let scanned = 0;
+  const maxNames = 60;
+  const maxContents = 200;
+  const maxBytes = 1.5 * 1024 * 1024;
+
+  function considerName(type, name, fullPath) {
+    if (names.length >= maxNames) return;
+    const rel = toWorkspaceRelative(root, fullPath);
+    if (!name.toLowerCase().includes(find) && !rel.toLowerCase().includes(find)) return;
+    names.push({ type, name, path: fullPath, relative: rel });
+  }
+
+  function searchFileContent(fullPath, name) {
+    if (contents.length >= maxContents) return;
+    let stat;
+    try {
+      stat = fs.statSync(fullPath);
+    } catch {
+      return;
+    }
+    if (!stat.isFile() || stat.size > maxBytes) return;
+    let text;
+    try {
+      text = fs.readFileSync(fullPath, 'utf8');
+    } catch {
+      return;
+    }
+    const lines = text.replace(/\r\n/g, '\n').split('\n');
+    const relative = toWorkspaceRelative(root, fullPath);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      const haystack = line.toLowerCase();
+      let from = 0;
+      while (from <= haystack.length - find.length) {
+        const column = haystack.indexOf(find, from);
+        if (column === -1) break;
+        contents.push({
+          name,
+          path: fullPath,
+          relative,
+          line: index,
+          column,
+          text: line.replace(/\s+/g, ' ').trim().slice(0, 180)
+        });
+        if (contents.length >= maxContents) return;
+        from = column + find.length;
+      }
+    }
+  }
+
+  function walk(directory, depth) {
+    if (depth > MAX_TREE_DEPTH || scanned >= MAX_TREE_ITEMS) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (scanned >= MAX_TREE_ITEMS || entry.isSymbolicLink()) break;
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (IGNORED_DIRECTORIES.has(entry.name) || entry.name.startsWith('.')) continue;
+        considerName('directory', entry.name, fullPath);
+        walk(fullPath, depth + 1);
+      } else if (entry.isFile() && DOCUMENT_RE.test(entry.name)) {
+        scanned += 1;
+        considerName('file', entry.name, fullPath);
+        searchFileContent(fullPath, entry.name);
+      }
+    }
+  }
+
+  walk(root, 0);
+  return { names, contents };
+});
+
 ipcMain.handle('dialog:save-as', async (_event, { defaultPath }) => {
   const result = await dialog.showSaveDialog(mainWindow, {
     title: '另存为',
@@ -810,7 +1080,9 @@ ipcMain.handle('dialog:save-as', async (_event, { defaultPath }) => {
     ]
   });
   focusMainWindow();
-  return result.canceled || !result.filePath ? null : result.filePath;
+  if (result.canceled || !result.filePath) return null;
+  authorizeWritePath(result.filePath);
+  return result.filePath;
 });
 
 ipcMain.handle('dialog:export-html', async (_event, { defaultPath }) => {
@@ -821,13 +1093,15 @@ ipcMain.handle('dialog:export-html', async (_event, { defaultPath }) => {
     filters: [{ name: 'HTML 网页', extensions: ['html'] }]
   });
   focusMainWindow();
-  return result.canceled || !result.filePath ? null : result.filePath;
+  if (result.canceled || !result.filePath) return null;
+  authorizeWritePath(result.filePath);
+  return result.filePath;
 });
 
 ipcMain.handle('file:write', async (_event, { filePath, content }) => {
-  const resolved = path.resolve(filePath);
+  const resolved = assertAuthorizedWrite(filePath);
   noteOwnWrite(resolved);
-  fs.writeFileSync(resolved, content, 'utf8');
+  fs.writeFileSync(resolved, String(content ?? ''), 'utf8');
   return true;
 });
 
@@ -895,6 +1169,9 @@ ipcMain.handle('image:resolve', async (_event, { documentPath, sources }) => {
     try {
       if (/^file:/i.test(src)) {
         const absolute = fileURLToPath(src);
+        if (!IMAGE_EXTENSIONS.has(path.extname(absolute).toLowerCase())) {
+          return { src, exists: false };
+        }
         if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
           return { src, exists: false };
         }
@@ -908,6 +1185,9 @@ ipcMain.handle('image:resolve', async (_event, { documentPath, sources }) => {
 
       const decoded = decodeURI(src.split(/[?#]/)[0]);
       const absolute = path.resolve(baseDir, decoded);
+      if (!IMAGE_EXTENSIONS.has(path.extname(absolute).toLowerCase())) {
+        return { src, exists: false };
+      }
       if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
         return { src, exists: false };
       }
@@ -920,6 +1200,62 @@ ipcMain.handle('image:resolve', async (_event, { documentPath, sources }) => {
     } catch {
       return { src, exists: false };
     }
+  });
+});
+
+function resolveLocalImagePath(documentPath, rawSrc) {
+  const src = String(rawSrc || '').trim();
+  if (!src || /^(https?:|data:|blob:)/i.test(src)) return null;
+  const baseDir = path.dirname(path.resolve(documentPath));
+  try {
+    const absolute = /^file:/i.test(src)
+      ? fileURLToPath(src.split(/[?#]/)[0])
+      : path.resolve(baseDir, decodeURI(src.split(/[?#]/)[0]));
+    if (!IMAGE_EXTENSIONS.has(path.extname(absolute).toLowerCase())) return null;
+    if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) return null;
+    return absolute;
+  } catch {
+    return null;
+  }
+}
+
+ipcMain.handle('html:inline-images', async (_event, { documentPath, html }) => {
+  const source = String(html || '');
+  if (!documentPath || !source) return source;
+  const replacements = new Map();
+  const pattern = /<img\b[^>]*\bsrc=["']([^"']+)["']/gi;
+  let match = pattern.exec(source);
+  while (match) {
+    const src = match[1];
+    if (!replacements.has(src)) {
+      const absolute = resolveLocalImagePath(documentPath, src);
+      if (absolute) {
+        try {
+          const buffer = fs.readFileSync(absolute);
+          if (buffer.length && buffer.length <= MAX_IMAGE_BYTES) {
+            const mime = IMAGE_MIME[path.extname(absolute).toLowerCase()] || 'application/octet-stream';
+            replacements.set(src, `data:${mime};base64,${buffer.toString('base64')}`);
+          }
+        } catch {
+          // 单张图读失败时保留原路径。
+        }
+      }
+    }
+    match = pattern.exec(source);
+  }
+  if (!replacements.size) return source;
+  return source.replace(/<img\b[^>]*\bsrc=["']([^"']+)["']/gi, (full, src) => {
+    const dataUrl = replacements.get(src);
+    return dataUrl ? full.replace(src, dataUrl) : full;
+  });
+});
+
+ipcMain.handle('app:print', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  return new Promise((resolve) => {
+    mainWindow.webContents.print({ silent: false, printBackground: true }, (success) => {
+      resolve(Boolean(success));
+    });
   });
 });
 
@@ -1101,6 +1437,7 @@ ipcMain.handle('file:rename', async (_event, { oldPath, name }) => {
   noteOwnWrite(source);
   noteOwnWrite(dest);
   fs.renameSync(source, dest);
+  authorizeWritePath(dest);
   return dest;
 });
 
@@ -1120,8 +1457,8 @@ ipcMain.handle('shell:reveal', async (_event, targetPath) => {
 });
 
 ipcMain.handle('shell:open-external', async (_event, url) => {
-  if (typeof url !== 'string' || !/^https:\/\//i.test(url)) {
-    throw new Error('仅支持 HTTPS 链接。');
+  if (typeof url !== 'string' || !/^(https?:|mailto:)/i.test(url)) {
+    throw new Error('仅支持网页或邮件链接。');
   }
   await shell.openExternal(url);
   return true;

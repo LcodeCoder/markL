@@ -7,7 +7,9 @@ import {
   visibleLineHint,
   toMarkdownImage,
   rewriteFileUrls,
-  imageAltFromName
+  imageAltFromName,
+  sanitizeMarkdownHtml,
+  visibleProseFromMarkdown
 } from './text-search.js';
 
 const LANGUAGES = [
@@ -61,6 +63,11 @@ const FONT_SIZES = {
   xlarge: '20px'
 };
 const IMAGE_FILE_RE = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
+const DOCUMENT_FILE_RE = /\.(md|markdown|txt)$/i;
+const SIDEBAR_WIDTH_KEY = 'markl-sidebar-width';
+const SIDEBAR_MIN = 248;
+const SIDEBAR_MAX = 480;
+const SIDEBAR_DEFAULT = 280;
 
 const state = {
   filePath: null,
@@ -96,6 +103,10 @@ const elements = {
   outlinePanel: document.getElementById('outline-panel'),
   tabFiles: document.getElementById('tab-files'),
   tabOutline: document.getElementById('tab-outline'),
+  tabSearch: document.getElementById('tab-search'),
+  searchPanel: document.getElementById('search-panel'),
+  workspaceSearchInput: document.getElementById('workspace-search-input'),
+  workspaceSearchResults: document.getElementById('workspace-search-results'),
   workspaceHeading: document.getElementById('workspace-heading'),
   workspaceName: document.getElementById('workspace-name'),
   workspacePath: document.getElementById('workspace-path'),
@@ -160,11 +171,14 @@ const elements = {
   updateRelease: document.getElementById('update-release'),
   updateActions: document.getElementById('update-actions'),
   updateClose: document.getElementById('update-close'),
-  checkUpdateButton: document.getElementById('check-update-button')
+  checkUpdateButton: document.getElementById('check-update-button'),
+  formatMenu: document.getElementById('format-menu')
 };
 
 function normalizeMarkdown(content = '') {
-  return content.replace(/<\/?cener(\s[^>]*)?>/gi, (tag) => tag.replace(/cener/i, 'center'));
+  return sanitizeMarkdownHtml(
+    content.replace(/<\/?cener(\s[^>]*)?>/gi, (tag) => tag.replace(/cener/i, 'center'))
+  );
 }
 
 function canonicalLanguage(language) {
@@ -225,7 +239,7 @@ function isHiddenVisual(el) {
 
 function isUnusableCaretHost(el) {
   if (!el) return true;
-  if (el.closest('.markl-live-hl, .language-popup, .table-toolbar, .find-bar, .update-panel, #quick-open, #app-dialog, #source-editor')) return true;
+  if (el.closest('.markl-live-hl, .language-popup, .table-toolbar, .find-bar, .update-panel, #quick-open, #app-dialog, #source-editor, .format-menu')) return true;
   if (el.closest('.vditor-ir__preview')) return true;
   if (el.closest('[data-type$="-open-marker"], [data-type$="-close-marker"]')) return true;
   const ir = getIrElement();
@@ -522,14 +536,15 @@ function updateTitle() {
 
 function updateCounts() {
   const markdown = getMarkdown() || '';
-  const text = markdown.replace(/\n+$/, '');
+  const raw = markdown.replace(/\n+$/, '');
+  const text = visibleProseFromMarkdown(markdown);
   const characters = Array.from(text).length;
   const cjk = (text.match(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g) || []).length;
   const latinWords = (text
     .replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g, ' ')
     .match(/[A-Za-z0-9]+(?:['_-][A-Za-z0-9]+)*/g) || []).length;
-  const lines = text ? text.split('\n').length : 0;
-  const paragraphs = text ? text.split(/\n\s*\n/).filter((b) => b.trim().length > 0).length : 0;
+  const lines = raw ? raw.split('\n').length : 0;
+  const paragraphs = raw ? raw.split(/\n\s*\n/).filter((b) => b.trim().length > 0).length : 0;
   elements.counts.textContent = (cjk + latinWords) + ' 字 · ' + characters + ' 字符 · ' + lines + ' 行 · ' + paragraphs + ' 段';
 }
 
@@ -729,10 +744,19 @@ async function doExportHtml() {
     const target = await window.markl.exportHtmlDialog({ defaultPath: baseName(state.filePath) });
     if (!target) return;
     const title = baseName(target).replace(/\.html$/i, '');
-    const body = getHTML();
+    let body = getHTML();
+    if (state.filePath && window.markl.inlineHtmlImages) {
+      body = await window.markl.inlineHtmlImages({ documentPath: state.filePath, html: body });
+    }
     const contentFont = FONT_STACKS[state.appearance.font] || FONT_STACKS.default;
-    const hljsCss = `
-.hljs{color:#24292e}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#d73a49}
+    const theme = state.appearance.theme === 'dark'
+      ? { bg: '#2d333c', text: '#e8ecf1', muted: '#b4bcc8', border: '#414854', code: '#272c34', rule: '#414854' }
+      : state.appearance.theme === 'sepia'
+        ? { bg: '#eae4d5', text: '#3a3428', muted: '#5a5348', border: '#cfc6b4', code: '#e0d8c6', rule: '#cfc6b4' }
+        : { bg: '#fbfbfc', text: '#1c2128', muted: '#5c6674', border: '#d5dbe3', code: '#eef1f5', rule: '#e8eaed' };
+    const hljsCss = theme.bg === '#2d333c'
+      ? `.hljs{color:#e6edf3}.hljs-keyword,.hljs-doctag,.hljs-type{color:#ff7b72}.hljs-title,.hljs-title.function_{color:#d2a8ff}.hljs-string,.hljs-meta .hljs-string{color:#a5d6ff}.hljs-number,.hljs-literal{color:#79c0ff}.hljs-comment{color:#8b949e}.hljs-built_in{color:#ffa657}`
+      : `.hljs{color:#24292e}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#d73a49}
 .hljs-title,.hljs-title.class_,.hljs-title.class_.inherited__,.hljs-title.function_{color:#6f42c1}
 .hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id,.hljs-variable{color:#005cc5}
 .hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#032f62}
@@ -740,7 +764,7 @@ async function doExportHtml() {
 .hljs-code,.hljs-comment,.hljs-formula{color:#6a737d}
 .hljs-name,.hljs-bullet,.hljs-deletion,.hljs-selector-pseudo,.hljs-selector-tag{color:#22863a}
 .hljs-addition,.hljs-section,.hljs-selector-class,.hljs-title.class_{color:#005cc5}
-.hljs-emphasis{font-style:italic}.hljs-strong{font-weight:700}`.trim();
+.hljs-emphasis{font-style:italic}.hljs-strong{font-weight:700}`;
     const fullHtml = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -748,13 +772,13 @@ async function doExportHtml() {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(title)}</title>
 <style>
-body{max-width:760px;margin:48px auto;padding:0 24px 80px;font-family:${contentFont};line-height:1.8;color:#1a1f27;overflow-wrap:anywhere}
-pre{background:#eef1f5;padding:16px 20px;border-radius:8px;overflow:auto}code{font-family:"Cascadia Code",Consolas,monospace;font-size:13.5px}pre code{background:none;padding:0}
-blockquote{color:#5c6674;border-left:3px solid #d5dbe3;margin-left:0;padding-left:16px}
-table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;word-break:break-word}th,td{border:1px solid #d5dbe3;padding:7px 12px;white-space:normal;overflow-wrap:break-word;word-break:break-word;vertical-align:top}img{max-width:100%}
-h1,h2{border-bottom:1px solid #e8eaed;padding-bottom:.3em}
+body{max-width:760px;margin:48px auto;padding:0 24px 80px;font-family:${contentFont};line-height:1.8;color:${theme.text};background:${theme.bg};overflow-wrap:anywhere}
+pre{background:${theme.code};padding:16px 20px;border-radius:8px;overflow:auto}code{font-family:"Cascadia Code",Consolas,monospace;font-size:13.5px}pre code{background:none;padding:0}
+blockquote{color:${theme.muted};border-left:3px solid ${theme.border};margin-left:0;padding-left:16px}
+table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;word-break:break-word}th,td{border:1px solid ${theme.border};padding:7px 12px;white-space:normal;overflow-wrap:break-word;word-break:break-word;vertical-align:top}img{max-width:100%}
+h1,h2{border-bottom:1px solid ${theme.rule};padding-bottom:.3em}
 center,font,div,span,p,section,article{font-family:inherit}center{text-align:center}
-${hljsCss}
+${hljsCss.trim()}
 </style>
 </head>
 <body>
@@ -788,17 +812,33 @@ function svgNode(markup) {
 
 function chevronIcon(expanded) {
   return svgNode(expanded
-    ? '<svg class="tree-chevron-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M4.2 6.2a.75.75 0 0 1 1.06 0L8 8.94l2.74-2.74a.75.75 0 1 1 1.06 1.06l-3.27 3.27a.75.75 0 0 1-1.06 0L4.2 7.26a.75.75 0 0 1 0-1.06Z"/></svg>'
-    : '<svg class="tree-chevron-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M6.2 4.2a.75.75 0 0 1 1.06 0l3.27 3.27a.75.75 0 0 1 0 1.06L7.26 11.8a.75.75 0 1 1-1.06-1.06L8.94 8 6.2 5.26a.75.75 0 0 1 0-1.06Z"/></svg>');
+    ? '<svg class="tree-chevron-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M4.6 6.2 8 9.6 11.4 6.2"/></svg>'
+    : '<svg class="tree-chevron-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M6.2 4.6 9.6 8 6.2 11.4"/></svg>');
 }
 
-function folderIcon() {
-  return svgNode('<svg class="tree-type-icon is-folder" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M1.5 3.75A1.75 1.75 0 0 1 3.25 2h3.05c.36 0 .7.14.96.4L8.5 3.64h4.25A1.75 1.75 0 0 1 14.5 5.39v6.86A1.75 1.75 0 0 1 12.75 14h-9.5A1.75 1.75 0 0 1 1.5 12.25V3.75Z"/></svg>');
+function folderIcon(open = false) {
+  if (open) {
+    return svgNode(`<svg class="tree-type-icon is-folder is-open" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path class="folder-fill" d="M2.3 7.45h11.4l-.95 5.15c-.1.52-.55.9-1.08.9H4.33c-.53 0-.98-.38-1.08-.9L2.3 7.45Z"/>
+      <path class="folder-line" d="M2.7 6.2V4.35c0-.4.32-.72.72-.72h1.82c.22 0 .42.1.56.27L6.7 5.05h5.35c.44 0 .8.35.8.78V6.3"/>
+      <path class="folder-line" d="M2.25 7.5h11.5l-.98 5.15c-.1.5-.54.85-1.06.85H4.29c-.52 0-.96-.35-1.06-.85L2.25 7.5Z"/>
+    </svg>`);
+  }
+  return svgNode(`<svg class="tree-type-icon is-folder" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+    <path class="folder-fill" d="M2.7 5.55h10.65v6.5c0 .5-.4.9-.9.9H3.6c-.5 0-.9-.4-.9-.9v-6.5Z"/>
+    <path class="folder-line" d="M2.65 5.5V4.32c0-.4.33-.72.74-.72h1.88c.23 0 .45.1.6.28L7.05 5.5h5.5c.48 0 .87.39.87.87v6.05c0 .55-.44 1-.98 1H3.56c-.54 0-.98-.45-.98-1V5.5h10.84"/>
+  </svg>`);
 }
 
 function fileIcon() {
-  return svgNode('<svg class="tree-type-icon is-file" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M3.5 1.5h5.22L13 5.78V13.5A1.5 1.5 0 0 1 11.5 15H3.5A1.5 1.5 0 0 1 2 13.5v-10.5A1.5 1.5 0 0 1 3.5 1.5Zm4.55.9v3.28h3.28Z"/></svg>');
+  return svgNode(`<svg class="tree-type-icon is-file" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+    <path class="file-line" d="M4.4 2.75h4.05L11.65 6v6.3c0 .5-.4.9-.9.9H4.4c-.5 0-.9-.4-.9-.9V3.65c0-.5.4-.9.9-.9Z"/>
+    <path class="file-line" d="M8.4 2.85v3.05h3.05"/>
+    <path class="file-line" d="M5.5 9.2h5M5.5 11.15h3.45"/>
+  </svg>`);
 }
+
+const FOLDER_BUTTON_SVG = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="folder-line" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round" d="M2.65 5.5V4.32c0-.4.33-.72.74-.72h1.88c.23 0 .45.1.6.28L7.05 5.5h5.5c.48 0 .87.39.87.87v6.05c0 .55-.44 1-.98 1H3.56c-.54 0-.98-.45-.98-1V5.5h10.84"/></svg>';
 
 function splitFileName(name) {
   const match = String(name || '').match(/^(.*?)(\.[^.]+)?$/);
@@ -874,7 +914,7 @@ function createTreeNode(node, depth = 0) {
       persistSession();
       renderFileTree();
     });
-    row.append(chevron, folderIcon(), name);
+    row.append(chevron, folderIcon(expanded), name);
   } else {
     const { stem, ext } = splitFileName(node.name);
     const stemEl = document.createElement('span');
@@ -1018,7 +1058,7 @@ function outlineKey(node) {
 }
 
 function headingIcon() {
-  return svgNode('<svg class="tree-type-icon is-file" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M2.5 3.75h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Zm0 3.5h8a.75.75 0 0 1 0 1.5h-8a.75.75 0 0 1 0-1.5Zm0 3.5h11a.75.75 0 0 1 0 1.5h-11a.75.75 0 0 1 0-1.5Z"/></svg>');
+  return svgNode('<svg class="tree-type-icon is-file" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M3.2 4.25h9.6M3.2 8h7.2M3.2 11.75h9.6"/></svg>');
 }
 
 function visibleHeadingText(element) {
@@ -1155,17 +1195,244 @@ function scheduleOutlineRefresh() {
   outlineTimer = window.setTimeout(renderHeadingTree, 140);
 }
 
-function setSidebarTab(tab) {
-  state.sidebarTab = tab === 'outline' ? 'outline' : 'files';
+function normalizeSidebarTab(tab) {
+  if (tab === 'outline' || tab === 'search') return tab;
+  return 'files';
+}
+
+function setSidebarTab(tab, options = {}) {
+  state.sidebarTab = normalizeSidebarTab(tab);
   localStorage.setItem(SIDEBAR_TAB_KEY, state.sidebarTab);
   const files = state.sidebarTab === 'files';
+  const outline = state.sidebarTab === 'outline';
+  const search = state.sidebarTab === 'search';
   elements.filesPanel.classList.toggle('hidden', !files);
-  elements.outlinePanel.classList.toggle('hidden', files);
+  elements.outlinePanel.classList.toggle('hidden', !outline);
+  elements.searchPanel?.classList.toggle('hidden', !search);
   elements.tabFiles.classList.toggle('is-active', files);
-  elements.tabOutline.classList.toggle('is-active', !files);
+  elements.tabOutline.classList.toggle('is-active', outline);
+  elements.tabSearch?.classList.toggle('is-active', search);
   elements.tabFiles.setAttribute('aria-selected', String(files));
-  elements.tabOutline.setAttribute('aria-selected', String(!files));
-  if (!files) renderHeadingTree();
+  elements.tabOutline.setAttribute('aria-selected', String(outline));
+  elements.tabSearch?.setAttribute('aria-selected', String(search));
+  if (outline) renderHeadingTree();
+  if (search) {
+    runWorkspaceSearch().catch(() => {});
+    if (options.focus !== false) {
+      elements.workspaceSearchInput?.focus();
+      elements.workspaceSearchInput?.select();
+    }
+  }
+}
+
+function openWorkspaceSearch() {
+  const hidden = document.body.classList.contains('sidebar-hidden');
+  if (hidden || window.matchMedia('(max-width: 820px)').matches) toggleSidebar(true);
+  setSidebarTab('search');
+}
+
+function highlightQuery(text, query) {
+  const source = String(text || '');
+  const needle = String(query || '');
+  if (!needle) return document.createTextNode(source);
+  const index = source.toLowerCase().indexOf(needle.toLowerCase());
+  if (index < 0) return document.createTextNode(source);
+  const frag = document.createDocumentFragment();
+  if (index > 0) frag.append(source.slice(0, index));
+  const mark = document.createElement('mark');
+  mark.textContent = source.slice(index, index + needle.length);
+  frag.append(mark, source.slice(index + needle.length));
+  return frag;
+}
+
+function renderWorkspaceSearchEmpty(message, detail) {
+  const empty = document.createElement('div');
+  empty.className = 'tree-empty';
+  empty.innerHTML = `<p>${escapeHtml(message)}</p><span>${escapeHtml(detail || '')}</span>`;
+  elements.workspaceSearchResults.replaceChildren(empty);
+}
+
+function appendSearchGroup(title) {
+  const heading = document.createElement('div');
+  heading.className = 'search-group-title';
+  heading.textContent = title;
+  elements.workspaceSearchResults.append(heading);
+}
+
+function appendNameHit(item, query) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `search-hit${item.type === 'file' && samePath(item.path, state.filePath) ? ' is-current' : ''}`;
+  const top = document.createElement('div');
+  top.className = 'search-hit-top';
+  top.append(item.type === 'directory' ? folderIcon() : fileIcon());
+  const name = document.createElement('span');
+  name.className = 'search-hit-name';
+  name.append(highlightQuery(item.name, query));
+  top.append(name);
+  const pathLabel = document.createElement('span');
+  pathLabel.className = 'search-hit-path';
+  pathLabel.textContent = item.relative || item.path;
+  button.append(top, pathLabel);
+  button.addEventListener('click', () => openWorkspaceSearchHit(item));
+  elements.workspaceSearchResults.append(button);
+}
+
+function appendContentHit(item, query) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'search-hit search-hit-match';
+  const line = document.createElement('div');
+  line.className = 'search-hit-line';
+  line.append(highlightQuery(item.text, query));
+  const pathLabel = document.createElement('span');
+  pathLabel.className = 'search-hit-path';
+  pathLabel.textContent = `${item.name}  ·  第 ${item.line + 1} 行`;
+  button.append(line, pathLabel);
+  button.addEventListener('click', () => openWorkspaceSearchHit({
+    type: 'file',
+    path: item.path,
+    line: item.line,
+    column: item.column,
+    query
+  }));
+  elements.workspaceSearchResults.append(button);
+}
+
+let workspaceSearchTimer = 0;
+let workspaceSearchToken = 0;
+
+function scheduleWorkspaceSearch() {
+  window.clearTimeout(workspaceSearchTimer);
+  workspaceSearchTimer = window.setTimeout(() => {
+    runWorkspaceSearch().catch((error) => console.warn('搜索工作区失败：', error));
+  }, 160);
+}
+
+async function runWorkspaceSearch() {
+  const list = elements.workspaceSearchResults;
+  if (!list) return;
+  const query = (elements.workspaceSearchInput?.value || '').trim();
+  if (!state.workspaceRoot) {
+    renderWorkspaceSearchEmpty('先打开一个文件夹', '搜索会遍历这个文件夹里的文档和子目录。');
+    return;
+  }
+  if (!query) {
+    renderWorkspaceSearchEmpty('搜索工作区', '按文件名、文件夹名或正文内容查找。');
+    return;
+  }
+
+  const token = (workspaceSearchToken += 1);
+  list.replaceChildren();
+  const loading = document.createElement('div');
+  loading.className = 'tree-empty';
+  loading.innerHTML = '<p>正在搜索</p><span>正在遍历文件夹里的文档。</span>';
+  list.append(loading);
+
+  const result = await window.markl.searchWorkspace({
+    rootPath: state.workspaceRoot,
+    query
+  });
+  if (token !== workspaceSearchToken) return;
+
+  const names = result?.names || [];
+  const contents = result?.contents || [];
+  list.replaceChildren();
+  if (!names.length && !contents.length) {
+    renderWorkspaceSearchEmpty('没有匹配', '换个文件名或正文里的词再试。');
+    return;
+  }
+  if (names.length) {
+    appendSearchGroup('文件与文件夹');
+    names.forEach((item) => appendNameHit(item, query));
+  }
+  if (contents.length) {
+    appendSearchGroup('正文');
+    contents.forEach((item) => appendContentHit(item, query));
+  }
+}
+
+function jumpToDocumentLine(line, query) {
+  jumpToSearchMatch(line, 0, query);
+}
+
+function jumpToSearchMatch(line, column, query) {
+  const markdown = getMarkdown();
+  const lines = markdown.split('\n');
+  let start = 0;
+  for (let index = 0; index < line && index < lines.length; index += 1) {
+    start += lines[index].length + 1;
+  }
+  const lineText = lines[line] || '';
+  const needle = String(query || '');
+  let offset = Number.isFinite(column) ? column : -1;
+  if (offset < 0 || (needle && lineText.toLowerCase().slice(offset, offset + needle.length) !== needle.toLowerCase())) {
+    offset = needle ? lineText.toLowerCase().indexOf(needle.toLowerCase()) : 0;
+  }
+  if (offset < 0) offset = 0;
+  const matchStart = start + offset;
+  const matchEnd = matchStart + Math.max(needle.length, 1);
+
+  if (state.sourceMode) {
+    selectSourceRange(matchStart, matchEnd);
+    return;
+  }
+
+  const matches = needle ? collectMatches(markdown, needle) : [];
+  const chosen = matches.find((item) => item.start === matchStart)
+    || matches.find((item) => item.start >= start && item.start < start + lineText.length);
+  if (chosen) {
+    findState.query = needle;
+    findState.matches = matches;
+    findState.index = matches.indexOf(chosen);
+    selectIrMatch(chosen, markdown);
+    return;
+  }
+
+  const hint = visibleLineHint(lineText) || needle;
+  const root = getIrElement();
+  if (!root || !hint) {
+    jumpToSourceLine(line);
+    return;
+  }
+  const nodes = [...root.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, th, pre, blockquote')];
+  const block = nodes.find((node) => (node.textContent || '').includes(hint));
+  block?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+}
+
+async function revealTreePath(targetPath) {
+  setSidebarTab('files', { focus: false });
+  expandAncestors(targetPath, state.workspaceRoot);
+  state.expandedPaths.add(targetPath);
+  persistSession();
+  renderFileTree();
+  requestAnimationFrame(() => {
+    const row = [...document.querySelectorAll('.tree-row')].find((item) => samePath(item.dataset.path, targetPath));
+    row?.scrollIntoView({ block: 'center' });
+  });
+}
+
+async function openWorkspaceSearchHit(item) {
+  if (item.type === 'directory') {
+    await revealTreePath(item.path);
+    return;
+  }
+  let loaded = false;
+  if (!samePath(item.path, state.filePath)) {
+    if (!(await confirmDiscardIfDirty())) return;
+    try {
+      const result = await window.markl.readFile({ filePath: item.path });
+      loadContent(result.filePath, result.content);
+      loaded = true;
+    } catch (error) {
+      showOperationError('打开文件', error);
+      return;
+    }
+  }
+  if (typeof item.line !== 'number') return;
+  const go = () => jumpToSearchMatch(item.line, item.column, item.query);
+  if (loaded) window.setTimeout(go, 80);
+  else go();
 }
 
 function applyWorkspace(payload, options = {}) {
@@ -1219,6 +1486,334 @@ async function refreshWorkspace() {
   }
 }
 
+function syncModeButton() {
+  if (!elements.modeLabel) return;
+  elements.modeLabel.classList.toggle('is-source', state.sourceMode);
+  const title = state.sourceMode
+    ? 'Markdown 源码，点击切回即时渲染'
+    : '即时渲染，点击查看 Markdown 源码';
+  elements.modeLabel.title = title;
+  elements.modeLabel.setAttribute('aria-label', title);
+}
+
+const formatMenuUi = { open: false };
+let savedFormatSelection = null;
+
+const INLINE_FORMAT = {
+  bold: { selector: '[data-type="strong"]', wrap: (text) => `**${text}**` },
+  italic: { selector: '[data-type="em"]', wrap: (text) => `*${text}*` },
+  strike: { selector: '[data-type="s"], [data-type="strike"]', wrap: (text) => `~~${text}~~` },
+  code: { selector: '[data-type="code"]', wrap: (text) => `\`${text}\`` },
+  link: {
+    selector: '[data-type="a"]',
+    wrap: (text) => {
+      const value = String(text || '').trim() || '链接';
+      return /^https?:\/\//i.test(value) ? `[链接](${value})` : `[${value}](https://)`;
+    }
+  }
+};
+
+function closeFormatMenu() {
+  if (!formatMenuUi.open || !elements.formatMenu) return;
+  formatMenuUi.open = false;
+  elements.formatMenu.classList.add('hidden');
+}
+
+function snapshotFormatSelection() {
+  if (state.sourceMode) {
+    savedFormatSelection = {
+      mode: 'source',
+      start: elements.sourceEditor.selectionStart,
+      end: elements.sourceEditor.selectionEnd
+    };
+    return;
+  }
+  const selection = window.getSelection();
+  savedFormatSelection = selection?.rangeCount
+    ? { mode: 'ir', range: selection.getRangeAt(0).cloneRange() }
+    : null;
+}
+
+function restoreSavedFormatSelection() {
+  if (!savedFormatSelection) return;
+  if (savedFormatSelection.mode === 'source') {
+    elements.sourceEditor.focus();
+    elements.sourceEditor.setSelectionRange(savedFormatSelection.start, savedFormatSelection.end);
+    return;
+  }
+  if (!savedFormatSelection.range) return;
+  getIrElement()?.focus();
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  try {
+    selection.addRange(savedFormatSelection.range);
+  } catch {
+    // 选区已经失效就算了。
+  }
+}
+
+function getEditorSelectionText() {
+  if (state.sourceMode) {
+    const { selectionStart, selectionEnd, value } = elements.sourceEditor;
+    return selectionStart === selectionEnd ? '' : value.slice(selectionStart, selectionEnd);
+  }
+  return (vditor?.getSelection?.() || window.getSelection()?.toString() || '').replace(/\u200b/g, '');
+}
+
+function selectCurrentParagraph() {
+  if (state.sourceMode) {
+    const textarea = elements.sourceEditor;
+    const value = textarea.value;
+    const pos = textarea.selectionStart;
+    const start = value.lastIndexOf('\n', pos - 1) + 1;
+    let end = value.indexOf('\n', pos);
+    if (end < 0) end = value.length;
+    if (end === start) return false;
+    textarea.setSelectionRange(start, end);
+    snapshotFormatSelection();
+    return true;
+  }
+  const ir = getIrElement();
+  const host = selectionHost();
+  const block = host?.closest?.('p, h1, h2, h3, h4, h5, h6, li, blockquote');
+  if (!ir || !block || !ir.contains(block)) return false;
+  const range = document.createRange();
+  range.selectNodeContents(block);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  snapshotFormatSelection();
+  return Boolean(selection.toString().trim());
+}
+
+function ensureFormatSelection() {
+  if (getEditorSelectionText().trim()) return true;
+  return selectCurrentParagraph();
+}
+
+function replaceEditorSelection(next) {
+  if (state.sourceMode) {
+    const textarea = elements.sourceEditor;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    if (!document.execCommand('insertText', false, next)) {
+      applyMarkdownEdit(replaceRange(textarea.value, start, end, next));
+      textarea.setSelectionRange(start, start + next.length);
+    }
+    recomputeDirty();
+    return;
+  }
+  if (vditor?.updateValue) vditor.updateValue(next);
+  else if (vditor?.insertValue) vditor.insertValue(next);
+  recomputeDirty();
+  scheduleCodeHighlight();
+  scheduleOutlineRefresh();
+}
+
+function visibleFormatText(node) {
+  const clone = node.cloneNode(true);
+  clone.querySelectorAll('.vditor-ir__marker').forEach((marker) => marker.remove());
+  return (clone.textContent || '').replace(/[\u200b\u00a0]/g, '');
+}
+
+function unwrapIrFormatNode(node) {
+  const text = visibleFormatText(node);
+  node.classList.add('vditor-ir__node--expand');
+  node.classList.remove('vditor-ir__node--hidden');
+  const range = document.createRange();
+  range.selectNode(node);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  replaceEditorSelection(text);
+}
+
+function unwrapMarkdownInline(text, kind) {
+  const source = String(text || '');
+  if (kind === 'bold') {
+    const match = source.match(/^\*\*([\s\S]*)\*\*$/) || source.match(/^__([\s\S]*)__$/);
+    return match ? match[1] : null;
+  }
+  if (kind === 'italic') {
+    if (/^\*\*[\s\S]*\*\*$/.test(source) || /^__[\s\S]*__$/.test(source)) return null;
+    const match = source.match(/^\*([\s\S]*)\*$/) || source.match(/^_([\s\S]*)_$/);
+    return match ? match[1] : null;
+  }
+  if (kind === 'strike') {
+    const match = source.match(/^~~([\s\S]*)~~$/);
+    return match ? match[1] : null;
+  }
+  if (kind === 'code') {
+    const match = source.match(/^`([\s\S]*)`$/);
+    return match ? match[1] : null;
+  }
+  if (kind === 'link') {
+    const match = source.match(/^\[([^\]]*)\]\([^)]*\)$/);
+    return match ? match[1] : null;
+  }
+  return null;
+}
+
+function closestInlineFormat(kind) {
+  const spec = INLINE_FORMAT[kind];
+  if (!spec) return null;
+  const host = selectionHost() || document.activeElement;
+  const node = host?.closest?.(spec.selector);
+  const ir = getIrElement();
+  return node && ir?.contains(node) ? node : null;
+}
+
+function applyInlineToggle(kind) {
+  restoreSavedFormatSelection();
+  const spec = INLINE_FORMAT[kind];
+  if (!spec) return;
+
+  if (!state.sourceMode) {
+    const node = closestInlineFormat(kind);
+    if (node) {
+      unwrapIrFormatNode(node);
+      return;
+    }
+  }
+
+  if (!getEditorSelectionText().trim() && !ensureFormatSelection()) return;
+  const selected = getEditorSelectionText();
+  const unwrapped = unwrapMarkdownInline(selected, kind);
+  if (unwrapped !== null) {
+    replaceEditorSelection(unwrapped);
+    return;
+  }
+  replaceEditorSelection(spec.wrap(selected));
+}
+
+function stripBlockPrefix(line) {
+  return String(line || '')
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^>\s?/, '')
+    .replace(/^[-*+]\s+(\[[ xX]\]\s+)?/, '')
+    .replace(/^\d+\.\s+/, '');
+}
+
+function applyLinePrefix(prefix) {
+  restoreSavedFormatSelection();
+  if (!ensureFormatSelection()) return;
+  const selected = getEditorSelectionText();
+  const lines = selected.split('\n');
+  const already = Boolean(prefix) && lines.length > 0 && lines.every((line) => line.startsWith(prefix));
+  const next = lines.map((line) => {
+    const body = stripBlockPrefix(line);
+    return already || !prefix ? body : `${prefix}${body}`;
+  }).join('\n');
+  replaceEditorSelection(next);
+}
+
+function applyClearFormat() {
+  restoreSavedFormatSelection();
+  if (!state.sourceMode) {
+    const host = selectionHost() || document.activeElement;
+    const node = host?.closest?.('[data-type="strong"], [data-type="em"], [data-type="s"], [data-type="code"], [data-type="a"]');
+    if (node && getIrElement()?.contains(node)) {
+      unwrapIrFormatNode(node);
+      return;
+    }
+  }
+  if (!ensureFormatSelection()) return;
+  const cleaned = getEditorSelectionText()
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^>\s?/gm, '')
+    .replace(/^[-*+]\s+(\[[ xX]\]\s+)?/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/~~(.+?)~~/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+  replaceEditorSelection(cleaned);
+}
+
+function refreshFormatMenuState() {
+  if (!elements.formatMenu) return;
+  const host = selectionHost();
+  const map = {
+    bold: Boolean(host?.closest('[data-type="strong"], strong, b')),
+    italic: Boolean(host?.closest('[data-type="em"], em, i')),
+    strike: Boolean(host?.closest('[data-type="s"], s, del')),
+    code: Boolean(host?.closest('[data-type="code"], code')),
+    link: Boolean(host?.closest('[data-type="a"], a')),
+    h1: Boolean(host?.closest('h1')),
+    h2: Boolean(host?.closest('h2')),
+    h3: Boolean(host?.closest('h3')),
+    quote: Boolean(host?.closest('blockquote')),
+    ul: Boolean(host?.closest('ul > li')),
+    ol: Boolean(host?.closest('ol > li')),
+    task: Boolean(host?.closest('[data-type="task-list-item"], .vditor-task'))
+  };
+  elements.formatMenu.querySelectorAll('[data-format]').forEach((button) => {
+    button.classList.toggle('is-active', Boolean(map[button.dataset.format]));
+  });
+}
+
+function positionFormatMenu(clientX, clientY) {
+  const menu = elements.formatMenu;
+  const wrap = elements.editorWrap;
+  if (!menu || !wrap) return;
+  menu.classList.remove('hidden');
+  const wrapRect = wrap.getBoundingClientRect();
+  const width = menu.offsetWidth || 280;
+  const height = menu.offsetHeight || 72;
+  let left = clientX - wrapRect.left;
+  let top = clientY - wrapRect.top + 8;
+  left = Math.max(8, Math.min(left, wrapRect.width - width - 8));
+  if (top + height > wrapRect.height - 8) top = Math.max(8, clientY - wrapRect.top - height - 8);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function openFormatMenu(event) {
+  if (!elements.formatMenu) return;
+  if (event.target.closest('#find-bar, #update-panel, #quick-open, #app-dialog, .language-popup, .table-toolbar, .table-menu')) return;
+  const inEditor = event.target.closest('#editor, #source-editor');
+  if (!inEditor) return;
+  event.preventDefault();
+  snapshotFormatSelection();
+  const insideInline = Boolean(event.target.closest('[data-type="strong"], [data-type="em"], [data-type="s"], [data-type="code"], [data-type="a"]'));
+  if (!getEditorSelectionText().trim() && !insideInline) selectCurrentParagraph();
+  formatMenuUi.open = true;
+  refreshFormatMenuState();
+  positionFormatMenu(event.clientX, event.clientY);
+}
+
+function handleFormatAction(action) {
+  restoreSavedFormatSelection();
+  if (action === 'cut') {
+    document.execCommand('cut');
+  } else if (action === 'copy') {
+    document.execCommand('copy');
+  } else if (action === 'paste') {
+    document.execCommand('paste');
+  } else if (action === 'bold' || action === 'italic' || action === 'strike' || action === 'code' || action === 'link') {
+    applyInlineToggle(action);
+  } else if (action === 'h1') {
+    applyLinePrefix('# ');
+  } else if (action === 'h2') {
+    applyLinePrefix('## ');
+  } else if (action === 'h3') {
+    applyLinePrefix('### ');
+  } else if (action === 'quote') {
+    applyLinePrefix('> ');
+  } else if (action === 'ul') {
+    applyLinePrefix('- ');
+  } else if (action === 'ol') {
+    applyLinePrefix('1. ');
+  } else if (action === 'task') {
+    applyLinePrefix('- [ ] ');
+  } else if (action === 'clear') {
+    applyClearFormat();
+  }
+  closeFormatMenu();
+}
+
 function toggleMode() {
   if (state.sourceMode) {
     const value = elements.sourceEditor.value || '';
@@ -1226,7 +1821,7 @@ function toggleMode() {
     elements.sourceEditor.classList.add('hidden');
     document.getElementById('editor').classList.remove('hidden');
     if (vditor) vditor.setValue(value, true);
-    elements.modeLabel.textContent = '即时渲染';
+    syncModeButton();
     focusEditor();
   } else {
     const value = getMarkdown();
@@ -1234,7 +1829,7 @@ function toggleMode() {
     elements.sourceEditor.value = value;
     document.getElementById('editor').classList.add('hidden');
     elements.sourceEditor.classList.remove('hidden');
-    elements.modeLabel.textContent = 'Markdown 源码';
+    syncModeButton();
     elements.sourceEditor.focus();
     hideTableToolbar();
   }
@@ -2524,6 +3119,7 @@ function readSession() {
       workspaceRoot: parsed.workspaceRoot || null,
       filePath: parsed.filePath || null,
       sidebarHidden: Boolean(parsed.sidebarHidden),
+      sidebarWidth: Number(parsed.sidebarWidth) || 0,
       expandedPaths: Array.isArray(parsed.expandedPaths) ? parsed.expandedPaths : []
     };
   } catch {
@@ -2537,6 +3133,7 @@ function persistSessionNow() {
     workspaceRoot: state.workspaceRoot,
     filePath: state.filePath,
     sidebarHidden: document.body.classList.contains('sidebar-hidden'),
+    sidebarWidth: getSidebarWidth(),
     expandedPaths: [...state.expandedPaths],
     at: Date.now()
   }));
@@ -2786,6 +3383,47 @@ async function handleEditorLink(href) {
   }
 }
 
+function flashDiskSync() {
+  const el = elements.saveStatus;
+  if (!el) return;
+  el.textContent = '已从磁盘更新';
+  el.classList.remove('is-dirty');
+  el.classList.add('is-synced');
+  window.clearTimeout(flashDiskSync.timer);
+  flashDiskSync.timer = window.setTimeout(() => {
+    el.classList.remove('is-synced');
+    updateTitle();
+  }, 1600);
+}
+
+function applyExternalReload(filePath, content) {
+  const wrap = elements.editorWrap;
+  const top = wrap?.scrollTop || 0;
+  const sourceTop = elements.sourceEditor?.scrollTop || 0;
+  const ir = getIrElement();
+  const hadFocus = Boolean(
+    (ir && (document.activeElement === ir || ir.contains(document.activeElement)))
+    || document.activeElement === elements.sourceEditor
+  );
+  state.filePath = filePath;
+  const normalized = normalizeMarkdown(content);
+  setMarkdown(normalized, true);
+  markClean(normalized);
+  updateCounts();
+  renderHeadingTree();
+  updateActiveTreeItem();
+  scheduleCodeHighlight();
+  scheduleImageResolve();
+  scheduleTableBalance();
+  refreshFindMatches({ stay: true, reveal: false });
+  persistSession();
+  rememberDiskStamp(filePath);
+  if (wrap) wrap.scrollTop = top;
+  if (elements.sourceEditor) elements.sourceEditor.scrollTop = sourceTop;
+  if (hadFocus) restoreEditorFocus();
+  flashDiskSync();
+}
+
 async function handleExternalFileChange() {
   if (!state.filePath || fileChangePromptOpen) return;
   try {
@@ -2799,7 +3437,7 @@ async function handleExternalFileChange() {
     if (state.diskMtime && stat.mtimeMs && stat.mtimeMs <= state.diskMtime + 20) return;
     if (!state.dirty) {
       const result = await window.markl.readFile({ filePath: state.filePath });
-      loadContent(result.filePath, result.content);
+      applyExternalReload(result.filePath, result.content);
       return;
     }
     fileChangePromptOpen = true;
@@ -2812,7 +3450,7 @@ async function handleExternalFileChange() {
     fileChangePromptOpen = false;
     if (ok) {
       const result = await window.markl.readFile({ filePath: state.filePath });
-      loadContent(result.filePath, result.content);
+      applyExternalReload(result.filePath, result.content);
     } else {
       state.diskMtime = stat.mtimeMs || Date.now();
     }
@@ -2830,8 +3468,17 @@ function handleFsChange(payload) {
     const treeTouched = paths.some((item) => isPathInside(item, state.workspaceRoot));
     if (treeTouched) refreshWorkspace().catch(() => {});
   }
-  if (state.filePath && paths.some((item) => samePath(item, state.filePath))) {
-    handleExternalFileChange();
+  if (state.filePath) {
+    const parent = parentDirectory(state.filePath);
+    const touched = paths.some((item) => (
+      samePath(item, state.filePath)
+      || samePath(item, parent)
+      || samePath(item, state.workspaceRoot)
+    ));
+    if (touched) handleExternalFileChange();
+  }
+  if (state.sidebarTab === 'search' && elements.workspaceSearchInput?.value.trim()) {
+    scheduleWorkspaceSearch();
   }
 }
 
@@ -2876,8 +3523,7 @@ function syncWorkspaceChrome() {
     elements.openFolderButton.classList.toggle('primary-button', !open);
     elements.openFolderButton.classList.toggle('text-button', open);
     elements.openFolderButton.classList.toggle('open-folder-quiet', open);
-    const folderSvg = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M1.5 3.75A1.75 1.75 0 0 1 3.25 2h3.05c.36 0 .7.14.96.4L8.5 3.64h4.25A1.75 1.75 0 0 1 14.5 5.39v6.86A1.75 1.75 0 0 1 12.75 14h-9.5A1.75 1.75 0 0 1 1.5 12.25V3.75Z"/></svg>';
-    elements.openFolderButton.innerHTML = folderSvg + (open ? '更换文件夹' : '打开文件夹');
+    elements.openFolderButton.innerHTML = FOLDER_BUTTON_SVG + (open ? '更换文件夹' : '打开文件夹');
     elements.openFolderButton.title = open ? '换一个文件夹作为工作区' : '选择一个包含 Markdown 文档的文件夹';
   }
   if (elements.workspacePath && !open) {
@@ -2896,8 +3542,23 @@ function setHistoryExpanded(open) {
   elements.historyToggle?.setAttribute('aria-expanded', String(open));
 }
 
+function getSidebarWidth() {
+  const raw = Number.parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width'), 10);
+  return Number.isFinite(raw) ? raw : SIDEBAR_DEFAULT;
+}
+
+function applySidebarWidth(width) {
+  const next = Math.round(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Number(width) || SIDEBAR_DEFAULT)));
+  document.documentElement.style.setProperty('--sidebar-width', `${next}px`);
+  localStorage.setItem(SIDEBAR_WIDTH_KEY, String(next));
+  return next;
+}
+
 function applySessionChrome() {
-  if (readSession().sidebarHidden) document.body.classList.add('sidebar-hidden');
+  const session = readSession();
+  if (session.sidebarHidden) document.body.classList.add('sidebar-hidden');
+  const storedWidth = session.sidebarWidth || Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+  applySidebarWidth(storedWidth || SIDEBAR_DEFAULT);
   setHistoryExpanded(isHistoryExpanded());
   syncWorkspaceChrome();
 }
@@ -3277,7 +3938,11 @@ function replaceAllCurrent() {
 function isImageFile(file) {
   if (!file) return false;
   if (file.type && file.type.startsWith('image/')) return true;
-  return IMAGE_FILE_RE.test(file.name || '');
+  return IMAGE_FILE_RE.test(file.name || file.path || '');
+}
+
+function isDocumentFile(file) {
+  return DOCUMENT_FILE_RE.test(file?.name || file?.path || '');
 }
 
 function filesFromDataTransfer(dataTransfer) {
@@ -3293,7 +3958,28 @@ function filesFromDataTransfer(dataTransfer) {
       }
     }
   }
-  return files.filter(isImageFile);
+  return files;
+}
+
+function imageFilesFromDataTransfer(dataTransfer) {
+  return filesFromDataTransfer(dataTransfer).filter(isImageFile);
+}
+
+async function openDroppedDocument(file) {
+  const filePath = file?.path;
+  if (!filePath) {
+    showOperationError('打开文件', new Error('无法读取拖入的文件路径。'));
+    return true;
+  }
+  if (samePath(filePath, state.filePath)) return true;
+  if (!(await confirmDiscardIfDirty())) return true;
+  try {
+    const result = await window.markl.readFile({ filePath });
+    loadContent(result.filePath, result.content);
+  } catch (error) {
+    showOperationError('打开文件', error);
+  }
+  return true;
 }
 
 async function ensureDocumentOnDisk() {
@@ -3501,11 +4187,26 @@ document.getElementById('new-button').addEventListener('click', doNew);
 elements.fileTree.addEventListener('contextmenu', onTreeContextMenu);
 elements.sidebar.addEventListener('contextmenu', (event) => {
   if (state.sidebarTab !== 'files') return;
-  if (event.target.closest('#file-tree, #open-history, .sidebar-tabs')) return;
+  if (event.target.closest('#file-tree, #open-history, .sidebar-rail')) return;
   onTreeContextMenu(event);
 });
-elements.tabFiles.addEventListener('click', () => setSidebarTab('files'));
-elements.tabOutline.addEventListener('click', () => setSidebarTab('outline'));
+elements.tabFiles.addEventListener('click', () => setSidebarTab('files', { focus: false }));
+elements.tabOutline.addEventListener('click', () => setSidebarTab('outline', { focus: false }));
+elements.tabSearch?.addEventListener('click', () => setSidebarTab('search'));
+elements.workspaceSearchInput?.addEventListener('input', (event) => {
+  if (event.isComposing) return;
+  scheduleWorkspaceSearch();
+});
+elements.workspaceSearchInput?.addEventListener('compositionend', () => {
+  scheduleWorkspaceSearch();
+});
+elements.workspaceSearchInput?.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    elements.workspaceSearchInput.value = '';
+    scheduleWorkspaceSearch();
+  }
+});
 document.getElementById('open-button').addEventListener('click', doOpen);
 document.getElementById('save-button').addEventListener('click', doSave);
 const updateUi = {
@@ -3530,9 +4231,11 @@ function setUpdateBusy(busy) {
   if (!elements.checkUpdateButton) return;
   elements.checkUpdateButton.disabled = busy;
   elements.checkUpdateButton.setAttribute('aria-busy', busy ? 'true' : 'false');
-  const questionSvg = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 0 13A6.5 6.5 0 0 0 8 1.5ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm9 3a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM6.92 6.085c.081-.16.19-.299.34-.398.145-.097.371-.187.74-.187.28 0 .553.087.738.225A.613.613 0 0 1 9 6.25c0 .177-.04.264-.077.318a.956.956 0 0 1-.277.245c-.076.051-.158.1-.258.161l-.007.004a7.728 7.728 0 0 0-.313.208 2.49 2.49 0 0 0-.498.523A.75.75 0 0 0 7.5 8.25h1a.248.248 0 0 1-.022-.104c.012-.082.073-.235.32-.498a5.27 5.27 0 0 1 .216-.144l.002-.001.069-.044c.11-.072.235-.153.35-.238.206-.148.42-.334.574-.58.157-.25.241-.534.241-.891a2.11 2.11 0 0 0-.775-1.665C9.037 4.265 8.44 4 7.75 4a2.77 2.77 0 0 0-1.845.716A2.37 2.37 0 0 0 5.22 6.085a.75.75 0 1 0 1.7 0Z"/></svg>';
-  const spinSvg = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="animation:spin .8s linear infinite"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 0 0-6.5 6.5.75.75 0 0 1-1.5 0A8 8 0 1 1 8 16a.75.75 0 0 1 0-1.5A6.5 6.5 0 0 0 8 1.5Z"/></svg>';
-  elements.checkUpdateButton.innerHTML = (busy ? spinSvg : questionSvg) + (busy ? '检查中…' : '检查更新');
+  const refreshSvg = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M3.3 8a4.7 4.7 0 0 1 7.95-3.35l.75-.75M12.75 2.7v2.85h-2.85M12.7 8a4.7 4.7 0 0 1-7.95 3.35l-.75.75M3.25 13.3V10.45h2.85"/></svg>';
+  const spinSvg = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" style="animation:spin .8s linear infinite"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M8 2.3a5.7 5.7 0 1 1-4.7 2.45"/></svg>';
+  elements.checkUpdateButton.innerHTML = busy ? spinSvg : refreshSvg;
+  elements.checkUpdateButton.title = busy ? '正在检查更新' : '检查更新';
+  elements.checkUpdateButton.setAttribute('aria-label', busy ? '正在检查更新' : '检查更新');
 }
 
 function setUpdateShown(el, shown) {
@@ -3828,10 +4531,26 @@ document.addEventListener('selectionchange', () => {
 });
 
 elements.editorWrap.addEventListener('scroll', () => {
+  closeFormatMenu();
   updateLiveHighlight();
   if (tableUi.table?.isConnected) positionTableToolbar(tableUi.table);
   else scheduleTableToolbar();
 }, true);
+
+elements.editorWrap.addEventListener('contextmenu', (event) => {
+  openFormatMenu(event);
+});
+
+elements.formatMenu?.addEventListener('mousedown', (event) => {
+  event.preventDefault();
+});
+
+elements.formatMenu?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-format]');
+  if (!button) return;
+  event.preventDefault();
+  handleFormatAction(button.dataset.format);
+});
 
 elements.editorWrap.addEventListener('mousedown', (event) => {
   if (state.popup.visible && !event.target.closest('.language-popup')) {
@@ -3884,6 +4603,10 @@ window.markl.on('menu:open-folder', doOpenFolder);
 window.markl.on('menu:save', doSave);
 window.markl.on('menu:save-as', doSaveAs);
 window.markl.on('menu:export-html', doExportHtml);
+window.markl.on('menu:print', () => {
+  if (window.markl.printDocument) window.markl.printDocument().catch(() => window.print());
+  else window.print();
+});
 window.markl.on('menu:toggle-mode', toggleMode);
 window.markl.on('menu:toggle-sidebar', () => toggleSidebar());
 window.markl.on('menu:theme', (theme) => setAppearance({ theme }));
@@ -3892,6 +4615,7 @@ window.markl.on('menu:font-size', (fontSize) => setAppearance({ fontSize }));
 window.markl.on('menu:format', formatActiveCode);
 window.markl.on('menu:find', () => openFindBar({ replace: false }));
 window.markl.on('menu:replace', () => openFindBar({ replace: true }));
+window.markl.on('menu:workspace-search', () => openWorkspaceSearch());
 window.markl.on('menu:check-update', () => runManualUpdateCheck());
 window.markl.on('menu:quick-open', () => openQuickOpen());
 window.markl.on('menu:about', async () => {
@@ -3919,6 +4643,7 @@ window.markl.on('app:before-close', async () => {
 });
 
 document.addEventListener('click', (event) => {
+  if (!event.target.closest('.format-menu')) closeFormatMenu();
   if (state.sourceMode) return;
   scheduleCodeHighlight();
   if (!event.target.closest('.table-toolbar')) closeTableMenus();
@@ -3969,7 +4694,8 @@ document.addEventListener('keydown', (event) => {
   }
   if (modifier && key === 'f') {
     event.preventDefault();
-    openFindBar({ replace: false });
+    if (event.shiftKey) openWorkspaceSearch();
+    else openFindBar({ replace: false });
     return;
   }
   if (modifier && key === 'h') {
@@ -3990,6 +4716,11 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && quickOpen.open) {
     event.preventDefault();
     closeQuickOpen();
+    return;
+  }
+  if (event.key === 'Escape' && formatMenuUi.open) {
+    event.preventDefault();
+    closeFormatMenu();
     return;
   }
   if (event.key === 'Escape' && tableUi.menu) {
@@ -4079,7 +4810,7 @@ function transferLooksLikeFiles(dataTransfer) {
 }
 
 document.addEventListener('paste', async (event) => {
-  const files = filesFromDataTransfer(event.clipboardData);
+  const files = imageFilesFromDataTransfer(event.clipboardData);
   if (!files.length) return;
   const target = event.target;
   if (target?.closest?.('#find-bar, #update-panel, #quick-open, #app-dialog, .tree-draft-row') || (target?.closest?.('input, textarea') && target !== elements.sourceEditor)) {
@@ -4111,19 +4842,67 @@ elements.editorWrap.addEventListener('drop', async (event) => {
   event.preventDefault();
   setDropActive(false);
   const files = filesFromDataTransfer(event.dataTransfer);
-  if (files.length) await insertImageFiles(files);
+  const documentFile = files.find(isDocumentFile);
+  if (documentFile) {
+    await openDroppedDocument(documentFile);
+    return;
+  }
+  const images = files.filter(isImageFile);
+  if (images.length) await insertImageFiles(images);
 });
 
-window.addEventListener('drop', (event) => {
+window.addEventListener('drop', async (event) => {
   setDropActive(false);
-  if (transferLooksLikeFiles(event.dataTransfer) || filesFromDataTransfer(event.dataTransfer).length) {
-    event.preventDefault();
-  }
+  const files = filesFromDataTransfer(event.dataTransfer);
+  if (!files.length && !transferLooksLikeFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  if (event.target.closest?.('#editor-wrap')) return;
+  const documentFile = files.find(isDocumentFile);
+  if (documentFile) await openDroppedDocument(documentFile);
 });
 
 window.addEventListener('dragend', () => setDropActive(false));
 
+function setupSidebarResize() {
+  const handle = document.getElementById('sidebar-resizer');
+  if (!handle) return;
+
+  const startResize = (clientX) => {
+    if (window.matchMedia('(max-width: 820px)').matches) return;
+    if (document.body.classList.contains('sidebar-hidden')) return;
+    const origin = clientX;
+    const startWidth = getSidebarWidth();
+    document.body.classList.add('is-resizing-sidebar');
+
+    const onMove = (event) => {
+      applySidebarWidth(startWidth + (event.clientX - origin));
+      scheduleTableBalance();
+    };
+    const onUp = () => {
+      document.body.classList.remove('is-resizing-sidebar');
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      persistSession();
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  handle.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    startResize(event.clientX);
+  });
+  handle.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    applySidebarWidth(getSidebarWidth() + (event.key === 'ArrowRight' ? 16 : -16));
+    persistSession();
+    scheduleTableBalance();
+  });
+}
+
 applySessionChrome();
+setupSidebarResize();
 applyAppearance(readStoredAppearance());
 persistAppearance();
 updateTitle();

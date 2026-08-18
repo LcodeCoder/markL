@@ -6,6 +6,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -15,12 +18,20 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      - run: npm test
       - run: npm run dist
       - uses: actions/upload-artifact@v4
         with:
           name: markl-windows
           path: |
             dist/MarkL*.exe
+      - name: Publish Windows release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/MarkL*.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: false
 
   macos:
     runs-on: macos-latest
@@ -30,6 +41,7 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      - run: npm test
       - run: npm run build:mac
       - uses: actions/upload-artifact@v4
         with:
@@ -38,3 +50,13 @@ jobs:
             dist/*.dmg
             dist/*-mac.zip
             dist/*.zip
+      - name: Publish macOS release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*-mac.zip
+            dist/*.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: false

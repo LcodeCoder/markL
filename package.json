@@ -1,12 +1,13 @@
 {
   "name": "markl",
-  "version": "2.0.5",
+  "version": "2.0.7",
   "description": "MarkL - 面向中文用户的轻量 Markdown 编辑器",
   "main": "src/main.js",
   "author": "Haiyu Information",
   "license": "MIT",
   "scripts": {
     "start": "node scripts/dev-launch.js",
+    "test": "node src/renderer/text-search.test.js",
     "make-icon": "node scripts/make-icon.js",
     "build": "npm run make-icon && electron-builder --win",
     "build:mac": "npm run make-icon && electron-builder --mac",
@@ -21,10 +22,7 @@
     },
     "files": [
       "src/**/*",
-      "assets/**/*",
-      "node_modules/**/*",
-      "!node_modules/.cache",
-      "!dist"
+      "assets/**/*"
     ],
     "win": {
       "icon": "assets/icon.ico",
@@ -85,6 +83,12 @@
         "name": "Markdown 文档",
         "description": "MarkL Markdown 文档",
         "icon": "assets/icon.ico"
+      },
+      {
+        "ext": "txt",
+        "name": "文本文档",
+        "description": "MarkL 文本文档",
+        "icon": "assets/icon.ico"
       }
     ]
   },
@@ -92,7 +96,8 @@
     "electron": "^32.0.0",
     "electron-builder": "^25.0.0",
     "jimp": "^0.22.12",
-    "png-to-ico": "^2.1.8"
+    "png-to-ico": "^2.1.8",
+    "resedit": "^1.7.2"
   },
   "dependencies": {
     "js-beautify": "^1.15.1",
