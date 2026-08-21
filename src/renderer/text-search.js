@@ -111,6 +111,141 @@ export function sanitizeMarkdownHtml(markdown) {
   return parts.join('');
 }
 
+export function cleanHeadingText(text) {
+  return String(text || '')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/[*_~]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function decodeHeadingEntities(text) {
+  return String(text || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
+}
+
+function htmlHeadingText(raw) {
+  return cleanHeadingText(decodeHeadingEntities(String(raw || '').replace(/<[^>]+>/g, ' ')));
+}
+
+function lineWithoutHtmlComments(line) {
+  return String(line || '').replace(/<!--[\s\S]*?-->/g, '');
+}
+
+function readHtmlHeading(lines, index) {
+  const line = lineWithoutHtmlComments(lines[index]);
+  const open = line.match(/^\s{0,3}<h([1-6])\b[^>]*>/i);
+  if (!open) return null;
+
+  const level = Number(open[1]);
+  const closeRe = new RegExp(`</h${level}\\s*>`, 'i');
+  const after = line.slice(open[0].length);
+  const closeAt = after.search(closeRe);
+  if (closeAt >= 0) {
+    return { level, text: after.slice(0, closeAt), end: index };
+  }
+
+  const parts = [after];
+  let end = index;
+  for (let next = index + 1; next < lines.length; next += 1) {
+    const candidate = lineWithoutHtmlComments(lines[next]);
+    if (!candidate.trim()) {
+      end = next - 1;
+      break;
+    }
+    const found = candidate.search(closeRe);
+    if (found >= 0) {
+      parts.push(candidate.slice(0, found));
+      end = next;
+      break;
+    }
+    if (/^\s{0,3}<h([1-6])\b/i.test(candidate) || /^(#{1,6})\s+/.test(candidate) || /^(`{3,}|~{3,})/.test(candidate)) {
+      end = next - 1;
+      break;
+    }
+    parts.push(candidate);
+    end = next;
+  }
+
+  return { level, text: parts.join(' '), end };
+}
+
+function pushOutlineItem(items, seen, level, text, line) {
+  if (!text) return;
+  const occurrence = seen.get(text) || 0;
+  seen.set(text, occurrence + 1);
+  items.push({ level, text, line, occurrence });
+}
+
+export function parseHeadingOutline(markdown) {
+  const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
+  const items = [];
+  const seen = new Map();
+  let inFence = false;
+  let fenceChar = '';
+  let inHtmlComment = false;
+  let start = 0;
+
+  if (lines[0]?.trim() === '---') {
+    const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
+    if (end > 0) start = end + 1;
+  }
+
+  for (let index = start; index < lines.length; index += 1) {
+    const line = lines[index];
+    const fence = line.match(/^(`{3,}|~{3,})/);
+    if (fence) {
+      const mark = fence[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = mark;
+      } else if (mark === fenceChar) {
+        inFence = false;
+        fenceChar = '';
+      }
+      continue;
+    }
+    if (inFence) continue;
+
+    if (inHtmlComment) {
+      if (line.includes('-->')) inHtmlComment = false;
+      continue;
+    }
+    if (/^\s*<!--/.test(line) && !line.includes('-->')) {
+      inHtmlComment = true;
+      continue;
+    }
+
+    const atx = line.match(/^(#{1,6})\s+(.+?)\s*$/);
+    if (atx) {
+      pushOutlineItem(items, seen, atx[1].length, cleanHeadingText(atx[2].replace(/\s+#+\s*$/, '')), index);
+      continue;
+    }
+
+    const htmlHeading = readHtmlHeading(lines, index);
+    if (htmlHeading) {
+      pushOutlineItem(items, seen, htmlHeading.level, htmlHeadingText(htmlHeading.text), index);
+      index = htmlHeading.end;
+      continue;
+    }
+
+    const next = lines[index + 1];
+    if (!line.trim() || line.startsWith('    ') || !next) continue;
+    const setext = next.match(/^(=+|-+)\s*$/);
+    if (!setext || /^[-*+]\s/.test(line) || /^\d+\.\s/.test(line)) continue;
+    pushOutlineItem(items, seen, setext[1].startsWith('=') ? 1 : 2, cleanHeadingText(line), index);
+  }
+
+  return items;
+}
+
 export function visibleProseFromMarkdown(markdown) {
   return String(markdown || '')
     .replace(/\r\n/g, '\n')

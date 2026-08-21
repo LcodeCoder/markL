@@ -1,7 +1,8 @@
 {
   "name": "markl",
-  "version": "2.0.7",
+  "version": "2.0.6",
   "description": "MarkL - 面向中文用户的轻量 Markdown 编辑器",
+  "homepage": "https://markl.lcode.space",
   "main": "src/main.js",
   "author": "Haiyu Information",
   "license": "MIT",

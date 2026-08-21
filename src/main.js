@@ -9,6 +9,7 @@ const ICON_ICO = path.join(__dirname, '..', 'assets', 'icon.ico');
 const GITHUB_REPO = 'LcodeCoder/markL';
 const RELEASES_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
 const RELEASES_PAGE = `https://github.com/${GITHUB_REPO}/releases/latest`;
+const WEBSITE_URL = 'https://markl.lcode.space';
 
 app.setName('MarkL');
 app.setAppUserModelId(APP_ID);
@@ -934,10 +935,16 @@ function buildMenu() {
           label: '检查更新…',
           click: () => mainWindow?.webContents.send('menu:check-update')
         },
+        { type: 'separator' },
+        {
+          label: '官网',
+          click: () => shell.openExternal(WEBSITE_URL)
+        },
         {
           label: 'GitHub 仓库',
           click: () => shell.openExternal(`https://github.com/${GITHUB_REPO}`)
         },
+        { type: 'separator' },
         {
           label: '关于 MarkL',
           click: () => mainWindow?.webContents.send('menu:about')

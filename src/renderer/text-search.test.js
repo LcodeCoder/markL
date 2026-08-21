@@ -8,7 +8,8 @@ import {
   rewriteFileUrls,
   imageAltFromName,
   sanitizeMarkdownHtml,
-  visibleProseFromMarkdown
+  visibleProseFromMarkdown,
+  parseHeadingOutline
 } from './text-search.js';
 
 function assert(condition, message) {
@@ -54,5 +55,41 @@ assert(prose.includes('链接'), 'link label should remain');
 assert(!prose.includes('```'), 'fences should be removed');
 assert(!prose.includes('const x'), 'code block body should be removed');
 assert(!prose.includes('./a.md'), 'link target should be removed');
+
+const atxOutline = parseHeadingOutline('# 一\n## 二\n### 三');
+assert(atxOutline.map((item) => `${item.level}:${item.text}`).join('|') === '1:一|2:二|3:三', 'atx outline failed');
+
+const setextOutline = parseHeadingOutline('一级\n===\n\n二级\n---');
+assert(setextOutline.map((item) => `${item.level}:${item.text}`).join('|') === '1:一级|2:二级', 'setext outline failed');
+
+const htmlOutline = parseHeadingOutline('<h1 align="center">MarkL</h1>\n<h2>安装</h2>\n<H3>下载</H3>');
+assert(
+  htmlOutline.map((item) => `${item.level}:${item.text}`).join('|') === '1:MarkL|2:安装|3:下载',
+  `html outline failed: ${htmlOutline.map((item) => item.text).join(',')}`
+);
+
+const mixedOutline = parseHeadingOutline('# Markdown 标题\n\n<h2>HTML 标题</h2>');
+assert(mixedOutline.length === 2 && mixedOutline[1].level === 2 && mixedOutline[1].text === 'HTML 标题', 'mixed outline failed');
+
+const innerHtmlOutline = parseHeadingOutline('<h1><strong>粗体</strong> 标题</h1>');
+assert(innerHtmlOutline[0]?.text === '粗体 标题', `inner html heading failed: ${innerHtmlOutline[0]?.text}`);
+
+const multilineOutline = parseHeadingOutline('<h1>\n多行标题\n</h1>');
+assert(multilineOutline[0]?.text === '多行标题', `multiline html heading failed: ${multilineOutline[0]?.text}`);
+
+const fencedOutline = parseHeadingOutline('```html\n<h1>代码里</h1>\n```\n# 真标题');
+assert(fencedOutline.length === 1 && fencedOutline[0].text === '真标题', 'fenced html heading should be ignored');
+
+const commentedOutline = parseHeadingOutline('<!-- <h1>隐藏</h1> -->\n<!--\n<h2>注释块</h2>\n-->\n# 可见');
+assert(commentedOutline.length === 1 && commentedOutline[0].text === '可见', 'commented html heading should be ignored');
+
+const emptyHtmlOutline = parseHeadingOutline('<h1></h1>\n<h2>有字</h2>');
+assert(emptyHtmlOutline.length === 1 && emptyHtmlOutline[0].text === '有字', 'empty html heading should be skipped');
+
+const unclosedHtmlOutline = parseHeadingOutline('<h1>半截\n# 后面的标题');
+assert(
+  unclosedHtmlOutline.map((item) => item.text).join('|') === '半截|后面的标题',
+  `unclosed html heading should not swallow following markdown: ${unclosedHtmlOutline.map((item) => item.text).join(',')}`
+);
 
 console.log('text-search tests passed');
