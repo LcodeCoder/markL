@@ -5445,7 +5445,7 @@ function runAppMenuAction(action, value) {
     font: () => setAppearance({ font: value }),
     'font-size': () => setAppearance({ fontSize: value }),
     'check-update': runManualUpdateCheck,
-    website: () => window.markl.openExternal('https://lcodecoder.github.io/markL/'),
+    website: () => window.markl.openExternal('https://markl.lcode.space'),
     github: () => window.markl.openExternal('https://github.com/LcodeCoder/markL'),
     about: showAboutDialog
   };
