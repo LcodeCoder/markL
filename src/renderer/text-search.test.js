@@ -1,5 +1,6 @@
 import {
   collectMatches,
+  compileSearch,
   replaceRange,
   replaceAllMatches,
   lineNumberAt,
@@ -11,6 +12,7 @@ import {
   visibleProseFromMarkdown,
   parseHeadingOutline
 } from './text-search.js';
+import { typesetChineseMarkdown } from './zh-typeset.js';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -20,6 +22,17 @@ const text = 'Foo foo FOO food';
 assert(collectMatches(text, 'foo').length === 4, 'case-insensitive should find 4');
 assert(collectMatches(text, 'foo', { caseSensitive: true }).length === 2, 'case-sensitive should find foo and food prefix');
 assert(collectMatches('aaa', 'aa').length === 1, 'matches should not overlap');
+assert(collectMatches('foo food', 'foo', { wholeWord: true }).length === 1, 'whole word should skip food');
+assert(collectMatches('ab12 ab', 'ab', { wholeWord: true }).length === 1, 'whole word should skip ab12');
+assert(collectMatches('cat cot cut', 'c.t', { regex: true }).length === 3, 'regex should match c.t');
+assert(compileSearch('(', { regex: true }).error === '正则无效', 'invalid regex should report error');
+assert(replaceAllMatches('foo food', 'foo', 'bar', { wholeWord: true }).text === 'bar food', 'whole-word replace failed');
+
+const typeset = typesetChineseMarkdown('写API文档,例如JSON。\n```js\nconst a=1\n```\n尾空格  \n看 http://a.com 即可');
+assert(typeset.includes('写 API 文档，例如 JSON。'), `cjk spacing/punct failed: ${typeset}`);
+assert(typeset.includes('```js\nconst a=1\n```'), 'fenced code should stay');
+assert(typeset.includes('http://a.com'), 'url should stay');
+assert(typeset.includes('\n尾空格\n'), `trailing spaces should be trimmed: ${JSON.stringify(typeset)}`);
 
 const replaced = replaceRange('hello world', 6, 11, 'MarkL');
 assert(replaced === 'hello MarkL', `replaceRange failed: ${replaced}`);

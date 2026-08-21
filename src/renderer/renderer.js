@@ -1,6 +1,7 @@
 import {
   FIND_MATCH_LIMIT,
   collectMatches,
+  compileSearch,
   replaceRange,
   replaceAllMatches,
   lineNumberAt,
@@ -13,6 +14,8 @@ import {
   cleanHeadingText,
   parseHeadingOutline
 } from './text-search.js';
+import { typesetChineseMarkdown } from './zh-typeset.js';
+import { DOC_TEMPLATES, templateById, fileNameForTemplate } from './templates.js';
 
 const LANGUAGES = [
   { id: 'javascript', label: 'JavaScript', aliases: ['js', 'node'], description: '网页与 Node.js' },
@@ -30,6 +33,7 @@ const LANGUAGES = [
   { id: 'go', label: 'Go', aliases: ['golang'], description: 'Go 语言' },
   { id: 'rust', label: 'Rust', aliases: ['rs'], description: 'Rust 语言' },
   { id: 'markdown', label: 'Markdown', aliases: ['md'], description: 'Markdown 文档' },
+  { id: 'mermaid', label: 'Mermaid', aliases: ['mmd', 'diagram'], description: '流程图 / 时序图' },
   { id: 'text', label: '纯文本', aliases: ['plaintext', 'txt'], description: '不使用语法高亮' }
 ];
 
@@ -37,7 +41,7 @@ const LANGUAGE_ALIASES = {
   js: 'javascript', node: 'javascript', ts: 'typescript', py: 'python',
   markup: 'html', xml: 'html', shell: 'bash', sh: 'bash', 'c++': 'cpp',
   cs: 'csharp', 'c#': 'csharp', golang: 'go', rs: 'rust', md: 'markdown',
-  plaintext: 'text', txt: 'text'
+  plaintext: 'text', txt: 'text', mmd: 'mermaid', diagram: 'mermaid'
 };
 
 const VDITOR_CDN = new URL('../../node_modules/vditor', import.meta.url).href;
@@ -48,7 +52,30 @@ const HISTORY_LIMIT = 16;
 const SIDEBAR_TAB_KEY = 'markl-sidebar-tab';
 const SESSION_KEY = 'markl-session';
 const APPEARANCE_KEY = 'markl-appearance';
-const THEME_IDS = ['light', 'dark', 'sepia'];
+const PINS_KEY = 'markl-pins';
+const CARET_KEY = 'markl-carets';
+const RECENT_KEY = 'markl-recent-files';
+const PIN_LIMIT = 5;
+const RECENT_LIMIT = 8;
+const CARET_LIMIT = 40;
+const THEME_IDS = ['light', 'mist', 'sepia', 'dark', 'ink', 'dusk'];
+const DARK_THEMES = new Set(['dark', 'ink', 'dusk']);
+const THEME_LABELS = {
+  light: '浅色',
+  mist: '青雾',
+  sepia: '护眼',
+  dark: '深色',
+  ink: '墨夜',
+  dusk: '海暮'
+};
+const THEME_SWATCHES = {
+  light: '#f4f5f7',
+  mist: '#d4ebf3',
+  sepia: '#e4dac8',
+  dark: '#2a2f37',
+  ink: '#181b22',
+  dusk: '#222c3a'
+};
 const FONT_STACKS = {
   default: '"Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Segoe UI", sans-serif',
   yahei: '"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif',
@@ -101,6 +128,21 @@ const elements = {
   fileTree: document.getElementById('file-tree'),
   treeEmpty: document.getElementById('tree-empty'),
   headingTree: document.getElementById('heading-tree'),
+  pinnedList: document.getElementById('pinned-list'),
+  workspaceReplaceBar: document.getElementById('workspace-replace-bar'),
+  workspaceReplaceInput: document.getElementById('workspace-replace-input'),
+  workspaceReplaceAll: document.getElementById('workspace-replace-all'),
+  findWord: document.getElementById('find-word'),
+  findRegex: document.getElementById('find-regex'),
+  templateBar: document.getElementById('template-bar'),
+  templateBarActions: document.getElementById('template-bar-actions'),
+  recentSwitcher: document.getElementById('recent-switcher'),
+  revisionPanel: document.getElementById('revision-panel'),
+  revisionList: document.getElementById('revision-list'),
+  revisionClose: document.getElementById('revision-close'),
+  assetPanel: document.getElementById('asset-panel'),
+  assetList: document.getElementById('asset-list'),
+  assetClose: document.getElementById('asset-close'),
   outlineDocName: document.getElementById('outline-doc-name'),
   outlineCount: document.getElementById('outline-count'),
   filesPanel: document.getElementById('files-panel'),
@@ -121,6 +163,8 @@ const elements = {
   openFolderButton: document.getElementById('open-folder-button'),
   openHistory: document.getElementById('open-history'),
   historyToggle: document.getElementById('history-toggle'),
+  appMenubar: document.getElementById('app-menubar'),
+  appMenuDropdown: document.getElementById('app-menu-dropdown'),
   appDialog: document.getElementById('app-dialog'),
   appDialogBackdrop: document.getElementById('app-dialog-backdrop'),
   appDialogTitle: document.getElementById('app-dialog-title'),
@@ -469,16 +513,19 @@ function renderHistory() {
 
     const copy = document.createElement('span');
     copy.className = 'history-copy';
+    const nameRow = document.createElement('span');
+    nameRow.className = 'history-name-row';
     const name = document.createElement('span');
     name.className = 'history-name';
     name.textContent = item.name || baseName(item.path);
-    const pathLine = document.createElement('span');
-    pathLine.className = 'history-path';
-    pathLine.textContent = parentDisplay(item.path) || item.path;
     const timeLine = document.createElement('span');
     timeLine.className = 'history-time';
     timeLine.textContent = relativeTime(item.at);
-    copy.append(name, pathLine, timeLine);
+    nameRow.append(name, timeLine);
+    const pathLine = document.createElement('span');
+    pathLine.className = 'history-path';
+    pathLine.textContent = parentDisplay(item.path) || item.path;
+    copy.append(nameRow, pathLine);
 
     openButton.append(item.kind === 'folder' ? folderIcon() : fileIcon(), copy);
     openButton.addEventListener('click', () => openHistoryItem(item));
@@ -488,7 +535,7 @@ function renderHistory() {
     remove.className = 'history-remove';
     remove.title = '从历史中移除';
     remove.setAttribute('aria-label', `从历史中移除 ${item.name || baseName(item.path)}`);
-    remove.textContent = '×';
+    remove.innerHTML = '<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M4.4 4.4 11.6 11.6M11.6 4.4 4.4 11.6"/></svg>';
     remove.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -568,16 +615,22 @@ function recomputeDirty() {
   updateCounts();
   scheduleOutlineRefresh();
   persistDraftSoon();
+  scheduleAutoSave();
+  syncTemplateBar();
 }
 
 function loadContent(filePath, content) {
+  if (state.filePath && state.filePath !== filePath) rememberCaret(state.filePath);
   state.filePath = filePath;
   const normalized = normalizeMarkdown(content);
   setMarkdown(normalized, true);
   markClean(normalized);
   updateCounts();
   renderHeadingTree();
-  if (filePath) rememberOpen('file', filePath);
+  if (filePath) {
+    rememberOpen('file', filePath);
+    rememberRecentFile(filePath);
+  }
   expandAncestors(filePath, state.workspaceRoot);
   updateActiveTreeItem();
   scheduleImageResolve();
@@ -585,18 +638,20 @@ function loadContent(filePath, content) {
   persistSession();
   rememberDiskStamp(filePath);
   syncWatch();
+  restoreCaret(filePath);
+  syncTemplateBar();
   restoreEditorFocus();
 }
 
 let dialogResolver = null;
 
 function isAppDialogOpen() {
-  return Boolean(elements.appDialog && !elements.appDialog.classList.contains('hidden'));
+  return Boolean(elements.appDialog && !elements.appDialog.classList.contains('hidden') && !elements.appDialog.classList.contains('is-leaving'));
 }
 
 function closeAppDialog(result) {
   if (!elements.appDialog) return;
-  elements.appDialog.classList.add('hidden');
+  concealLayer(elements.appDialog);
   const resolve = dialogResolver;
   dialogResolver = null;
   if (resolve) resolve(Boolean(result));
@@ -606,9 +661,9 @@ function closeAppDialog(result) {
 }
 
 const DIALOG_ICONS = {
-  info: '<svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 0 13A6.5 6.5 0 0 0 8 1.5ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm6.5-.25A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>',
-  warning: '<svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.32.437a.25.25 0 0 0-.44 0L1.255 12.862a.25.25 0 0 0 .22.368h12.05a.25.25 0 0 0 .22-.368ZM8.75 5.75a.75.75 0 0 0-1.5 0v2.5a.75.75 0 0 0 1.5 0v-2.5ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"/></svg>',
-  danger: '<svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>'
+  info: '<svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="5.4" fill="none" stroke="currentColor" stroke-width="1.35"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M8 7.15v4.05M8 5.2v.25"/></svg>',
+  warning: '<svg viewBox="0 0 16 16" width="16" height="16"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M8 2.7 13.7 13.1H2.3Z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M8 6.4v3.2M8 11.35v.3"/></svg>',
+  danger: '<svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="5.4" fill="none" stroke="currentColor" stroke-width="1.35"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M6.1 6.1l3.8 3.8M9.9 6.1l-3.8 3.8"/></svg>'
 };
 
 function showAppDialog({ title, message, ok = '确定', cancel = '', danger = false, type = '' } = {}) {
@@ -634,7 +689,7 @@ function showAppDialog({ title, message, ok = '确定', cancel = '', danger = fa
     } else {
       elements.appDialogCancel.classList.add('hidden');
     }
-    elements.appDialog.classList.remove('hidden');
+    revealLayer(elements.appDialog);
     elements.appDialogOk.focus();
   });
 }
@@ -663,6 +718,7 @@ function showOperationError(action, error) {
 
 async function doNew() {
   if (!(await confirmDiscardIfDirty())) return;
+  if (state.filePath) rememberCaret(state.filePath);
   state.filePath = null;
   setMarkdown('', true);
   markClean('');
@@ -673,6 +729,7 @@ async function doNew() {
   persistSession();
   rememberDiskStamp(null);
   syncWatch();
+  syncTemplateBar();
   focusEditor();
 }
 
@@ -699,13 +756,24 @@ async function openTreeFile(filePath) {
   }
 }
 
+async function snapshotCurrentRevision() {
+  if (!state.filePath || !state.savedContent) return;
+  try {
+    await window.markl.saveRevision?.({ filePath: state.filePath, content: state.savedContent });
+  } catch {
+    // 历史失败不影响保存。
+  }
+}
+
 async function doSave() {
   try {
     if (!state.filePath) return doSaveAs();
     const content = getMarkdown();
+    if (content !== state.savedContent) await snapshotCurrentRevision();
     await window.markl.writeFile({ filePath: state.filePath, content });
     markClean(content);
     rememberDiskStamp(state.filePath);
+    rememberCaret(state.filePath);
     clearDraftSoon();
     return true;
   } catch (error) {
@@ -719,6 +787,7 @@ async function doSaveAs() {
     const target = await window.markl.saveAsDialog({ defaultPath: baseName(state.filePath) });
     if (!target) return false;
     const content = getMarkdown();
+    if (state.filePath && content !== state.savedContent) await snapshotCurrentRevision();
     await window.markl.writeFile({ filePath: target, content });
     state.filePath = target;
     markClean(content);
@@ -748,50 +817,22 @@ async function doExportHtml() {
     const target = await window.markl.exportHtmlDialog({ defaultPath: baseName(state.filePath) });
     if (!target) return;
     const title = baseName(target).replace(/\.html$/i, '');
-    let body = getHTML();
-    if (state.filePath && window.markl.inlineHtmlImages) {
-      body = await window.markl.inlineHtmlImages({ documentPath: state.filePath, html: body });
-    }
-    const contentFont = FONT_STACKS[state.appearance.font] || FONT_STACKS.default;
-    const theme = state.appearance.theme === 'dark'
-      ? { bg: '#2d333c', text: '#e8ecf1', muted: '#b4bcc8', border: '#414854', code: '#272c34', rule: '#414854' }
-      : state.appearance.theme === 'sepia'
-        ? { bg: '#eae4d5', text: '#3a3428', muted: '#5a5348', border: '#cfc6b4', code: '#e0d8c6', rule: '#cfc6b4' }
-        : { bg: '#fbfbfc', text: '#1c2128', muted: '#5c6674', border: '#d5dbe3', code: '#eef1f5', rule: '#e8eaed' };
-    const hljsCss = theme.bg === '#2d333c'
-      ? `.hljs{color:#e6edf3}.hljs-keyword,.hljs-doctag,.hljs-type{color:#ff7b72}.hljs-title,.hljs-title.function_{color:#d2a8ff}.hljs-string,.hljs-meta .hljs-string{color:#a5d6ff}.hljs-number,.hljs-literal{color:#79c0ff}.hljs-comment{color:#8b949e}.hljs-built_in{color:#ffa657}`
-      : `.hljs{color:#24292e}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#d73a49}
-.hljs-title,.hljs-title.class_,.hljs-title.class_.inherited__,.hljs-title.function_{color:#6f42c1}
-.hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id,.hljs-variable{color:#005cc5}
-.hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#032f62}
-.hljs-built_in,.hljs-symbol{color:#e36209}
-.hljs-code,.hljs-comment,.hljs-formula{color:#6a737d}
-.hljs-name,.hljs-bullet,.hljs-deletion,.hljs-selector-pseudo,.hljs-selector-tag{color:#22863a}
-.hljs-addition,.hljs-section,.hljs-selector-class,.hljs-title.class_{color:#005cc5}
-.hljs-emphasis{font-style:italic}.hljs-strong{font-weight:700}`;
-    const fullHtml = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${escapeHtml(title)}</title>
-<style>
-body{max-width:760px;margin:48px auto;padding:0 24px 80px;font-family:${contentFont};line-height:1.8;color:${theme.text};background:${theme.bg};overflow-wrap:anywhere}
-pre{background:${theme.code};padding:16px 20px;border-radius:8px;overflow:auto}code{font-family:"Cascadia Code",Consolas,monospace;font-size:13.5px}pre code{background:none;padding:0}
-blockquote{color:${theme.muted};border-left:3px solid ${theme.border};margin-left:0;padding-left:16px}
-table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;word-break:break-word}th,td{border:1px solid ${theme.border};padding:7px 12px;white-space:normal;overflow-wrap:break-word;word-break:break-word;vertical-align:top}img{max-width:100%}
-h1,h2{border-bottom:1px solid ${theme.rule};padding-bottom:.3em}
-center,font,div,span,p,section,article{font-family:inherit}center{text-align:center}
-${hljsCss.trim()}
-</style>
-</head>
-<body>
-${body}
-</body>
-</html>`;
-    await window.markl.writeFile({ filePath: target, content: fullHtml });
+    await window.markl.writeFile({ filePath: target, content: await buildStandaloneHtml(title) });
   } catch (error) {
     showOperationError('导出 HTML', error);
+  } finally {
+    restoreEditorFocus();
+  }
+}
+
+async function doExportPdf() {
+  try {
+    const target = await window.markl.exportPdfDialog({ defaultPath: baseName(state.filePath) });
+    if (!target) return;
+    const title = baseName(target).replace(/\.pdf$/i, '');
+    await window.markl.exportPdf({ filePath: target, html: await buildStandaloneHtml(title) });
+  } catch (error) {
+    showOperationError('导出 PDF', error);
   } finally {
     restoreEditorFocus();
   }
@@ -1006,6 +1047,37 @@ function visibleHeadingText(element) {
 
 function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+const LAYER_EXIT_MS = 140;
+const layerHideTimers = new WeakMap();
+
+function revealLayer(el) {
+  if (!el) return;
+  const pending = layerHideTimers.get(el);
+  if (pending) {
+    window.clearTimeout(pending);
+    layerHideTimers.delete(el);
+  }
+  el.classList.remove('hidden', 'is-leaving');
+}
+
+function concealLayer(el, options = {}) {
+  if (!el || el.classList.contains('hidden')) return;
+  const pending = layerHideTimers.get(el);
+  if (pending) window.clearTimeout(pending);
+  if (prefersReducedMotion() || options.instant) {
+    el.classList.add('hidden');
+    el.classList.remove('is-leaving');
+    return;
+  }
+  el.classList.add('is-leaving');
+  const timer = window.setTimeout(() => {
+    el.classList.add('hidden');
+    el.classList.remove('is-leaving');
+    layerHideTimers.delete(el);
+  }, LAYER_EXIT_MS);
+  layerHideTimers.set(el, timer);
 }
 
 function jumpToSourceLine(line) {
@@ -1359,6 +1431,7 @@ async function runWorkspaceSearch() {
     return;
   }
   if (!query) {
+    elements.workspaceReplaceBar?.classList.add('hidden');
     renderWorkspaceSearchEmpty('搜索工作区', '按文件名、文件夹名或正文内容查找。');
     return;
   }
@@ -1372,13 +1445,21 @@ async function runWorkspaceSearch() {
 
   const result = await window.markl.searchWorkspace({
     rootPath: state.workspaceRoot,
-    query
+    query,
+    caseSensitive: findState.caseSensitive,
+    wholeWord: findState.wholeWord,
+    regex: findState.regex
   });
   if (token !== workspaceSearchToken) return;
 
   const names = result?.names || [];
   const contents = result?.contents || [];
   list.replaceChildren();
+  elements.workspaceReplaceBar?.classList.toggle('hidden', !contents.length);
+  if (result?.error) {
+    renderWorkspaceSearchEmpty('正则无效', '检查一下表达式后再搜。');
+    return;
+  }
   if (!names.length && !contents.length) {
     renderWorkspaceSearchEmpty('没有匹配', '换个文件名或正文里的词再试。');
     return;
@@ -1499,6 +1580,7 @@ function applyWorkspace(payload, options = {}) {
   elements.newTreeButton.classList.remove('hidden');
   syncWorkspaceChrome();
   renderFileTree();
+  renderPinnedList();
   persistSession();
   syncWatch();
 }
@@ -1557,7 +1639,7 @@ const INLINE_FORMAT = {
 function closeFormatMenu() {
   if (!formatMenuUi.open || !elements.formatMenu) return;
   formatMenuUi.open = false;
-  elements.formatMenu.classList.add('hidden');
+  concealLayer(elements.formatMenu);
 }
 
 function snapshotFormatSelection() {
@@ -1799,7 +1881,7 @@ function positionFormatMenu(clientX, clientY) {
   const menu = elements.formatMenu;
   const wrap = elements.editorWrap;
   if (!menu || !wrap) return;
-  menu.classList.remove('hidden');
+  revealLayer(menu);
   const wrapRect = wrap.getBoundingClientRect();
   const width = menu.offsetWidth || 280;
   const height = menu.offsetHeight || 72;
@@ -1977,6 +2059,10 @@ async function handleTreeAction(action, kind, targetPath) {
     });
     return;
   }
+  if ((action === 'pin' || action === 'unpin') && targetPath) {
+    togglePin(targetPath);
+    return;
+  }
   if (action === 'delete' && targetPath) {
     const name = baseName(targetPath);
     const message = kind === 'directory'
@@ -2015,7 +2101,11 @@ async function onTreeContextMenu(event) {
   const targetPath = row?.dataset.path || state.workspaceRoot;
   if ((kind === 'file' || kind === 'directory') && !targetPath) return;
 
-  const action = await window.markl.showTreeMenu({ kind: state.workspaceRoot ? kind : 'blank', targetPath });
+  const action = await window.markl.showTreeMenu({
+    kind: state.workspaceRoot ? kind : 'blank',
+    targetPath,
+    pinned: kind === 'file' && isPinned(targetPath)
+  });
   return handleTreeAction(action, kind, targetPath);
 }
 
@@ -2047,7 +2137,7 @@ function readStoredAppearance() {
 
 function applyVditorTheme(theme) {
   if (!vditor) return;
-  const dark = theme === 'dark';
+  const dark = DARK_THEMES.has(theme);
   vditor.setTheme(
     dark ? 'dark' : 'classic',
     dark ? 'dark' : 'light',
@@ -2059,8 +2149,9 @@ function applyVditorTheme(theme) {
 function applyAppearance(appearance) {
   const next = normalizeAppearance(appearance);
   state.appearance = next;
-  document.body.classList.remove('theme-light', 'theme-dark', 'theme-sepia');
+  document.body.classList.remove('theme-light', 'theme-mist', 'theme-sepia', 'theme-dark', 'theme-ink', 'theme-dusk');
   document.body.classList.add(`theme-${next.theme}`);
+  document.body.classList.toggle('is-dark-theme', DARK_THEMES.has(next.theme));
   document.body.dataset.font = next.font;
   document.body.dataset.fontSize = next.fontSize;
   document.documentElement.style.setProperty('--font-content', FONT_STACKS[next.font]);
@@ -2068,6 +2159,7 @@ function applyAppearance(appearance) {
   applyVditorTheme(next.theme);
   scheduleCodeHighlight();
   scheduleTableBalance();
+  syncAppMenuChecks();
 }
 
 function persistAppearance() {
@@ -2184,7 +2276,7 @@ function openLanguagePopup(query = '') {
   state.popup.query = query;
   state.popup.items = filteredLanguages(query);
   state.popup.selected = 0;
-  elements.languagePopup.classList.remove('hidden');
+  revealLayer(elements.languagePopup);
   elements.languageQueryInput.value = query;
   renderLanguagePopup();
   requestAnimationFrame(() => {
@@ -2199,7 +2291,7 @@ function closeLanguagePopup(options = {}) {
   const restore = options.restoreFocus ?? (document.activeElement === input);
   state.popup.visible = false;
   if (document.activeElement === input) input.blur();
-  elements.languagePopup.classList.add('hidden');
+  concealLayer(elements.languagePopup);
   if (restore) restoreEditorFocus();
 }
 
@@ -2650,8 +2742,8 @@ function closeTableMenus() {
   tableUi.menu = '';
   tableUi.hoverCols = 0;
   tableUi.hoverRows = 0;
-  elements.tableInsertMenu.classList.add('hidden');
-  elements.tableMoreMenu.classList.add('hidden');
+  concealLayer(elements.tableInsertMenu, { instant: true });
+  concealLayer(elements.tableMoreMenu, { instant: true });
   elements.tableInsertButton.setAttribute('aria-expanded', 'false');
   elements.tableMoreButton.setAttribute('aria-expanded', 'false');
 }
@@ -2660,7 +2752,7 @@ function hideTableToolbar() {
   closeTableMenus();
   tableUi.table = null;
   tableUi.cell = null;
-  elements.tableToolbar.classList.add('hidden');
+  concealLayer(elements.tableToolbar, { instant: true });
 }
 
 function positionTableToolbar(table) {
@@ -2668,7 +2760,7 @@ function positionTableToolbar(table) {
   const wrapRect = wrap.getBoundingClientRect();
   const tableRect = table.getBoundingClientRect();
   if (tableRect.bottom < wrapRect.top + 8 || tableRect.top > wrapRect.bottom - 8) {
-    elements.tableToolbar.classList.add('hidden');
+    concealLayer(elements.tableToolbar, { instant: true });
     return;
   }
   const barHeight = elements.tableToolbar.offsetHeight || 32;
@@ -2678,7 +2770,7 @@ function positionTableToolbar(table) {
   elements.tableToolbar.style.top = `${top}px`;
   elements.tableToolbar.style.left = `${left}px`;
   elements.tableToolbar.style.width = `${Math.min(Math.max(tableRect.width, 228), maxWidth)}px`;
-  elements.tableToolbar.classList.remove('hidden');
+  revealLayer(elements.tableToolbar);
 }
 
 function refreshTableToolbarState() {
@@ -2976,7 +3068,7 @@ function toggleTableMenu(name) {
   const menu = name === 'insert' ? elements.tableInsertMenu : elements.tableMoreMenu;
   const button = name === 'insert' ? elements.tableInsertButton : elements.tableMoreButton;
   if (name === 'insert') renderTableSizePicker();
-  menu.classList.remove('hidden');
+  revealLayer(menu);
   button.setAttribute('aria-expanded', 'true');
 }
 
@@ -3141,8 +3233,11 @@ const findState = {
   open: false,
   replaceOpen: false,
   caseSensitive: false,
+  wholeWord: false,
+  regex: false,
   query: '',
   matches: [],
+  error: '',
   index: 0
 };
 
@@ -3186,6 +3281,137 @@ function persistSession() {
   sessionTimer = window.setTimeout(persistSessionNow, 80);
 }
 
+function readJsonMap(key, fallback) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonMap(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function captureEditorView() {
+  const ir = getIrElement();
+  return {
+    sourceMode: state.sourceMode,
+    irScroll: ir?.scrollTop || 0,
+    sourceScroll: elements.sourceEditor?.scrollTop || 0,
+    sourceStart: elements.sourceEditor?.selectionStart || 0,
+    sourceEnd: elements.sourceEditor?.selectionEnd || 0
+  };
+}
+
+function restoreEditorView(view) {
+  if (!view) return;
+  window.requestAnimationFrame(() => {
+    const ir = getIrElement();
+    if (ir && Number.isFinite(view.irScroll)) ir.scrollTop = view.irScroll;
+    if (elements.sourceEditor) {
+      if (Number.isFinite(view.sourceScroll)) elements.sourceEditor.scrollTop = view.sourceScroll;
+      if (state.sourceMode && Number.isFinite(view.sourceStart)) {
+        elements.sourceEditor.setSelectionRange(view.sourceStart, view.sourceEnd ?? view.sourceStart);
+      }
+    }
+  });
+}
+
+function readCaretMap() {
+  const map = readJsonMap(CARET_KEY, {});
+  return map && typeof map === 'object' ? map : {};
+}
+
+function rememberCaret(filePath) {
+  if (!filePath) return;
+  const map = readCaretMap();
+  map[filePath] = { ...captureEditorView(), at: Date.now() };
+  const keys = Object.keys(map).sort((a, b) => (map[b].at || 0) - (map[a].at || 0));
+  keys.slice(CARET_LIMIT).forEach((key) => {
+    delete map[key];
+  });
+  writeJsonMap(CARET_KEY, map);
+}
+
+function restoreCaret(filePath) {
+  if (!filePath) return;
+  restoreEditorView(readCaretMap()[filePath]);
+}
+
+function readPins() {
+  const pins = readJsonMap(PINS_KEY, []);
+  return Array.isArray(pins) ? pins.filter(Boolean).slice(0, PIN_LIMIT) : [];
+}
+
+function writePins(pins) {
+  writeJsonMap(PINS_KEY, pins.slice(0, PIN_LIMIT));
+  renderPinnedList();
+  updateActiveTreeItem();
+}
+
+function isPinned(filePath) {
+  return readPins().some((item) => samePath(item, filePath));
+}
+
+function togglePin(filePath) {
+  if (!filePath) return;
+  const pins = readPins();
+  if (pins.some((item) => samePath(item, filePath))) {
+    writePins(pins.filter((item) => !samePath(item, filePath)));
+    return;
+  }
+  writePins([filePath, ...pins.filter((item) => !samePath(item, filePath))].slice(0, PIN_LIMIT));
+}
+
+function readRecentFiles() {
+  const items = readJsonMap(RECENT_KEY, []);
+  return Array.isArray(items) ? items.filter(Boolean) : [];
+}
+
+function rememberRecentFile(filePath) {
+  if (!filePath) return;
+  const next = [filePath, ...readRecentFiles().filter((item) => !samePath(item, filePath))].slice(0, RECENT_LIMIT);
+  writeJsonMap(RECENT_KEY, next);
+}
+
+function renderPinnedList() {
+  if (!elements.pinnedList) return;
+  const pins = readPins();
+  elements.pinnedList.replaceChildren();
+  if (!pins.length) {
+    elements.pinnedList.classList.add('hidden');
+    return;
+  }
+  elements.pinnedList.classList.remove('hidden');
+  const label = document.createElement('div');
+  label.className = 'pinned-label';
+  label.textContent = '钉住';
+  elements.pinnedList.appendChild(label);
+  pins.forEach((filePath) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'tree-row';
+    row.dataset.path = filePath;
+    row.title = filePath;
+    if (samePath(filePath, state.filePath)) row.classList.add('is-active');
+    const chevron = document.createElement('span');
+    chevron.className = 'tree-chevron is-leaf';
+    const name = document.createElement('span');
+    name.className = 'tree-label';
+    name.textContent = baseName(filePath);
+    row.append(chevron, fileIcon(), name);
+    row.addEventListener('click', () => openTreeFile(filePath));
+    row.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      togglePin(filePath);
+    });
+    elements.pinnedList.appendChild(row);
+  });
+}
+
 let draftTimer = 0;
 let fileChangePromptOpen = false;
 
@@ -3198,6 +3424,369 @@ function persistDraftSoon() {
 function clearDraftSoon() {
   window.clearTimeout(draftTimer);
   window.markl.clearDraft?.().catch(() => {});
+}
+
+let autoSaveTimer = 0;
+let lastRevisionAt = 0;
+
+function scheduleAutoSave() {
+  if (state.restoringSession || !state.filePath) return;
+  window.clearTimeout(autoSaveTimer);
+  autoSaveTimer = window.setTimeout(runAutoSave, 1600);
+}
+
+async function runAutoSave() {
+  if (!state.filePath || !state.dirty || state.fileMissing || state.restoringSession) return;
+  const content = getMarkdown();
+  if (content === state.savedContent) return;
+  try {
+    if (Date.now() - lastRevisionAt > 120000) {
+      await snapshotCurrentRevision();
+      lastRevisionAt = Date.now();
+    }
+    await window.markl.writeFile({ filePath: state.filePath, content });
+    markClean(content);
+    rememberDiskStamp(state.filePath);
+    rememberCaret(state.filePath);
+    clearDraftSoon();
+    elements.saveStatus.textContent = '已自动保存';
+    elements.saveStatus.classList.add('is-synced');
+    elements.saveStatus.classList.remove('is-dirty');
+    window.setTimeout(() => {
+      if (!state.dirty) {
+        elements.saveStatus.textContent = '已保存';
+        elements.saveStatus.classList.remove('is-synced');
+      }
+    }, 1600);
+  } catch {
+    // 自动保存失败时保留未保存状态，下次再试。
+  }
+}
+
+function syncTemplateBar() {
+  if (!elements.templateBar) return;
+  const empty = !state.filePath && !String(getMarkdown() || '').trim();
+  elements.templateBar.classList.toggle('hidden', !empty);
+}
+
+function applyTemplate(id) {
+  const template = templateById(id);
+  setMarkdown(template.body || '', true);
+  recomputeDirty();
+  syncTemplateBar();
+  focusEditor();
+}
+
+async function newFromTemplate(id) {
+  closeAppMenu();
+  if (state.workspaceRoot) {
+    if (!(await confirmDiscardIfDirty())) return;
+    try {
+      const result = await window.markl.createFile({
+        dirPath: state.workspaceRoot,
+        name: fileNameForTemplate(id),
+        content: templateById(id).body || ''
+      });
+      await refreshWorkspace();
+      loadContent(result.filePath, result.content);
+    } catch (error) {
+      showOperationError('从模板新建', error);
+    }
+    return;
+  }
+  if (!(await confirmDiscardIfDirty())) return;
+  await doNew();
+  applyTemplate(id);
+}
+
+function renderTemplateBar() {
+  if (!elements.templateBarActions) return;
+  elements.templateBarActions.replaceChildren();
+  DOC_TEMPLATES.filter((item) => item.id !== 'blank').forEach((item) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'template-chip';
+    button.textContent = item.name;
+    button.title = item.hint;
+    button.addEventListener('click', () => applyTemplate(item.id));
+    elements.templateBarActions.appendChild(button);
+  });
+}
+
+async function openTemplateMenu() {
+  closeAppMenu();
+  if (state.filePath || String(getMarkdown() || '').trim()) {
+    await doNew();
+  }
+  syncTemplateBar();
+}
+
+function typesetCurrentDocument() {
+  const next = typesetChineseMarkdown(getMarkdown());
+  if (next === getMarkdown()) {
+    showAppDialog({ title: '中文排版', message: '这篇已经很干净，没有需要整理的地方。', ok: '知道了' });
+    return;
+  }
+  applyMarkdownEdit(next);
+}
+
+function markdownImageNames(markdown) {
+  const names = new Set();
+  const text = String(markdown || '');
+  const pattern = /!\[[^\]]*\]\(([^)]+)\)|<img\b[^>]*\bsrc=["']([^"']+)["']/gi;
+  let hit = pattern.exec(text);
+  while (hit) {
+    const src = String(hit[1] || hit[2] || '').split(/[?#]/)[0];
+    const base = src.replace(/\\/g, '/').split('/').pop();
+    if (base) names.add(decodeURIComponent(base));
+    hit = pattern.exec(text);
+  }
+  return names;
+}
+
+async function openRevisionPanel() {
+  closeAppMenu();
+  concealLayer(elements.assetPanel);
+  if (!state.filePath) {
+    showAppDialog({ title: '本地历史', message: '先保存这篇文档，之后每次保存都会留下最近 10 个版本。', ok: '知道了' });
+    return;
+  }
+  const items = await window.markl.listRevisions({ filePath: state.filePath }).catch(() => []);
+  elements.revisionList.replaceChildren();
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'tree-empty';
+    empty.innerHTML = '<p>还没有历史版本</p><span>保存一次之后，这里会出现最近 10 次内容。</span>';
+    elements.revisionList.appendChild(empty);
+  } else {
+    items.forEach((item) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'revision-item';
+      const time = new Date(item.at).toLocaleString('zh-CN', { hour12: false });
+      button.innerHTML = `<strong>${time}</strong><span>${escapeHtml(item.preview || '（空）')}</span>`;
+      button.addEventListener('click', async () => {
+        if (!(await confirmDiscardIfDirty())) return;
+        try {
+          const content = await window.markl.readRevision({ filePath: state.filePath, id: item.id });
+          setMarkdown(content, true);
+          recomputeDirty();
+          concealLayer(elements.revisionPanel);
+          focusEditor();
+        } catch (error) {
+          showOperationError('恢复历史', error);
+        }
+      });
+      elements.revisionList.appendChild(button);
+    });
+  }
+  revealLayer(elements.revisionPanel);
+}
+
+async function openAssetPanel() {
+  closeAppMenu();
+  concealLayer(elements.revisionPanel);
+  if (!(await ensureDocumentOnDisk()) || !state.filePath) return;
+  const assets = await window.markl.listAssets({ documentPath: state.filePath }).catch(() => []);
+  elements.assetList.replaceChildren();
+  if (!assets.length) {
+    const empty = document.createElement('div');
+    empty.className = 'tree-empty';
+    empty.innerHTML = '<p>还没有图片</p><span>粘贴或拖入图片后，会出现在文档旁的 assets 文件夹。</span>';
+    elements.assetList.appendChild(empty);
+  } else {
+    assets.forEach((item) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'asset-item';
+      const kb = Math.max(1, Math.round(item.bytes / 1024));
+      button.innerHTML = `<strong>${escapeHtml(item.name)}</strong><span>${kb} KB · ${escapeHtml(item.relative)}</span>`;
+      button.addEventListener('click', () => {
+        rememberImageAlias(item.fileUrl, item.relative);
+        insertMarkdownSnippet(toMarkdownImage(imageAltFromName(item.name), item.relative));
+        concealLayer(elements.assetPanel);
+        focusEditor();
+      });
+      elements.assetList.appendChild(button);
+    });
+  }
+  revealLayer(elements.assetPanel);
+}
+
+async function cleanUnusedImages() {
+  closeAppMenu();
+  if (!(await ensureDocumentOnDisk()) || !state.filePath) return;
+  const assets = await window.markl.listAssets({ documentPath: state.filePath }).catch(() => []);
+  const used = markdownImageNames(getMarkdown());
+  const unused = assets.filter((item) => !used.has(item.name));
+  if (!unused.length) {
+    showAppDialog({ title: '清理图片', message: '这篇文档引用的图片都还在用，没有可以删的。', ok: '知道了' });
+    return;
+  }
+  const ok = await showAppDialog({
+    title: '清理未使用图片',
+    message: `将删除 ${unused.length} 张未被正文引用的图片：\n${unused.map((item) => item.name).join('\n')}`,
+    ok: '删除',
+    cancel: '取消',
+    danger: true
+  });
+  if (!ok) return;
+  try {
+    await window.markl.deleteImages({ documentPath: state.filePath, names: unused.map((item) => item.name) });
+    if (isPathInside(state.filePath, state.workspaceRoot)) await refreshWorkspace();
+  } catch (error) {
+    showOperationError('清理图片', error);
+  }
+}
+
+async function replaceInWorkspace() {
+  const query = (elements.workspaceSearchInput?.value || '').trim();
+  const replacement = elements.workspaceReplaceInput?.value ?? '';
+  if (!query || !state.workspaceRoot) return;
+  const compiled = compileSearch(query, findOptions());
+  if (compiled.error) {
+    showAppDialog({ title: '无法替换', message: compiled.error, ok: '知道了' });
+    return;
+  }
+  const result = await window.markl.searchWorkspace({
+    rootPath: state.workspaceRoot,
+    query,
+    ...findOptions()
+  });
+  const files = [...new Set((result?.contents || []).map((item) => item.path))];
+  if (!files.length) {
+    showAppDialog({ title: '全部替换', message: '正文里没有可替换的匹配。', ok: '知道了' });
+    return;
+  }
+  const ok = await showAppDialog({
+    title: '在文件夹中替换',
+    message: `将在 ${files.length} 个文档里把「${query}」替换为「${replacement}」。此操作会立刻写盘。`,
+    ok: '全部替换',
+    cancel: '取消',
+    danger: true
+  });
+  if (!ok) return;
+  let count = 0;
+  for (const filePath of files) {
+    try {
+      const source = samePath(filePath, state.filePath)
+        ? getMarkdown()
+        : (await window.markl.readFile({ filePath })).content;
+      const next = replaceAllMatches(source, query, replacement, findOptions());
+      if (!next.count) continue;
+      if (samePath(filePath, state.filePath)) await snapshotCurrentRevision();
+      await window.markl.writeFile({ filePath, content: next.text });
+      count += next.count;
+      if (samePath(filePath, state.filePath)) {
+        setMarkdown(next.text, false);
+        markClean(next.text);
+      }
+    } catch (error) {
+      showOperationError('文件夹替换', error);
+      return;
+    }
+  }
+  await runWorkspaceSearch();
+  showAppDialog({ title: '全部替换', message: `已替换 ${count} 处。`, ok: '知道了' });
+}
+
+const recentSwitch = { open: false, index: 0, items: [] };
+
+function closeRecentSwitcher() {
+  recentSwitch.open = false;
+  concealLayer(elements.recentSwitcher, { instant: true });
+}
+
+function renderRecentSwitcher() {
+  if (!elements.recentSwitcher) return;
+  elements.recentSwitcher.replaceChildren();
+  recentSwitch.items.forEach((filePath, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `recent-switch-item${index === recentSwitch.index ? ' is-active' : ''}`;
+    button.innerHTML = `<span>${escapeHtml(baseName(filePath))}</span><span class="recent-switch-path">${escapeHtml(parentDirectory(filePath) || '')}</span>`;
+    elements.recentSwitcher.appendChild(button);
+  });
+}
+
+async function cycleRecentFile(back) {
+  const items = readRecentFiles().filter((item) => item);
+  if (items.length < 2) return;
+  if (!recentSwitch.open) {
+    recentSwitch.open = true;
+    recentSwitch.items = items;
+    recentSwitch.index = back ? items.length - 1 : 1;
+    renderRecentSwitcher();
+    revealLayer(elements.recentSwitcher);
+    return;
+  }
+  const delta = back ? -1 : 1;
+  recentSwitch.index = (recentSwitch.index + delta + items.length) % items.length;
+  renderRecentSwitcher();
+}
+
+async function commitRecentSwitcher() {
+  if (!recentSwitch.open) return;
+  const target = recentSwitch.items[recentSwitch.index];
+  closeRecentSwitcher();
+  if (target && !samePath(target, state.filePath)) await openTreeFile(target);
+}
+
+function exportThemeColors() {
+  const theme = state.appearance.theme;
+  if (DARK_THEMES.has(theme)) {
+    return { bg: '#2d333c', text: '#e8ecf1', muted: '#b4bcc8', border: '#414854', code: '#272c34', rule: '#414854' };
+  }
+  if (theme === 'sepia') {
+    return { bg: '#eae4d5', text: '#3a3428', muted: '#5a5348', border: '#cfc6b4', code: '#e0d8c6', rule: '#cfc6b4' };
+  }
+  if (theme === 'mist') {
+    return { bg: '#f7fafc', text: '#1a2430', muted: '#445566', border: '#d5e0e8', code: '#eaf1f5', rule: '#d5e0e8' };
+  }
+  return { bg: '#fbfbfc', text: '#1c2128', muted: '#5c6674', border: '#d5dbe3', code: '#eef1f5', rule: '#e8eaed' };
+}
+
+async function buildStandaloneHtml(title) {
+  let body = getHTML();
+  if (state.filePath && window.markl.inlineHtmlImages) {
+    body = await window.markl.inlineHtmlImages({ documentPath: state.filePath, html: body });
+  }
+  const contentFont = FONT_STACKS[state.appearance.font] || FONT_STACKS.default;
+  const theme = exportThemeColors();
+  const dark = DARK_THEMES.has(state.appearance.theme);
+  const hljsCss = dark
+    ? `.hljs{color:#e6edf3}.hljs-keyword,.hljs-doctag,.hljs-type{color:#ff7b72}.hljs-title,.hljs-title.function_{color:#d2a8ff}.hljs-string,.hljs-meta .hljs-string{color:#a5d6ff}.hljs-number,.hljs-literal{color:#79c0ff}.hljs-comment{color:#8b949e}.hljs-built_in{color:#ffa657}`
+    : `.hljs{color:#24292e}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#d73a49}
+.hljs-title,.hljs-title.class_,.hljs-title.class_.inherited__,.hljs-title.function_{color:#6f42c1}
+.hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id,.hljs-variable{color:#005cc5}
+.hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#032f62}
+.hljs-built_in,.hljs-symbol{color:#e36209}
+.hljs-code,.hljs-comment,.hljs-formula{color:#6a737d}
+.hljs-name,.hljs-bullet,.hljs-deletion,.hljs-selector-pseudo,.hljs-selector-tag{color:#22863a}
+.hljs-addition,.hljs-section,.hljs-selector-class,.hljs-title.class_{color:#005cc5}
+.hljs-emphasis{font-style:italic}.hljs-strong{font-weight:700}`;
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(title)}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+<style>
+body{max-width:760px;margin:48px auto;padding:0 24px 80px;font-family:${contentFont};line-height:1.8;color:${theme.text};background:${theme.bg};overflow-wrap:anywhere}
+pre{background:${theme.code};padding:16px 20px;border-radius:8px;overflow:auto}code{font-family:"Cascadia Code",Consolas,monospace;font-size:13.5px}pre code{background:none;padding:0}
+blockquote{color:${theme.muted};border-left:3px solid ${theme.border};margin-left:0;padding-left:16px}
+table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;word-break:break-word}th,td{border:1px solid ${theme.border};padding:7px 12px;white-space:normal;overflow-wrap:break-word;word-break:break-word;vertical-align:top}img{max-width:100%}
+h1,h2{border-bottom:1px solid ${theme.rule};padding-bottom:.3em}
+center,font,div,span,p,section,article{font-family:inherit}center{text-align:center}
+.katex-display{margin:1em 0;overflow-x:auto}
+${hljsCss.trim()}
+</style>
+</head>
+<body>
+${body}
+</body>
+</html>`;
 }
 
 async function persistDraftNow() {
@@ -3282,7 +3871,7 @@ function closeQuickOpen({ restoreFocus = true } = {}) {
   quickOpen.open = false;
   quickOpen.items = [];
   quickOpen.selected = 0;
-  elements.quickOpen.classList.add('hidden');
+  concealLayer(elements.quickOpen);
   if (restoreFocus) restoreEditorFocus();
 }
 
@@ -3338,7 +3927,7 @@ function openQuickOpen() {
   closeLanguagePopup({ restoreFocus: false });
   quickOpen.open = true;
   quickOpen.selected = 0;
-  elements.quickOpen.classList.remove('hidden');
+  revealLayer(elements.quickOpen);
   elements.quickOpenInput.value = '';
   refreshQuickOpenItems();
   elements.quickOpenInput.focus();
@@ -3690,7 +4279,11 @@ async function resolveEditorImages() {
 }
 
 function findOptions() {
-  return { caseSensitive: findState.caseSensitive };
+  return {
+    caseSensitive: findState.caseSensitive,
+    wholeWord: findState.wholeWord,
+    regex: findState.regex
+  };
 }
 
 function currentSelectionText() {
@@ -3708,8 +4301,11 @@ function queryFromSelection() {
 }
 
 function updateFindCount() {
-  const { matches, index, query } = findState;
-  if (!query) {
+  const { matches, index, query, error } = findState;
+  if (error) {
+    elements.findCount.textContent = error;
+    elements.findCount.classList.add('is-empty');
+  } else if (!query) {
     elements.findCount.textContent = '';
     elements.findCount.classList.remove('is-empty');
   } else if (!matches.length) {
@@ -3730,7 +4326,9 @@ function updateFindCount() {
 
 function collectFindMatches() {
   findState.query = elements.findInput.value;
-  findState.matches = collectMatches(getMarkdown(), findState.query, findOptions());
+  const compiled = compileSearch(findState.query, findOptions());
+  findState.error = compiled.error || '';
+  findState.matches = compiled.matches(getMarkdown());
   if (!findState.matches.length) findState.index = 0;
   else if (findState.index >= findState.matches.length) findState.index = findState.matches.length - 1;
   updateFindCount();
@@ -3898,7 +4496,7 @@ function setReplaceOpen(open) {
 function openFindBar(options = {}) {
   const selected = queryFromSelection();
   findState.open = true;
-  elements.findBar.classList.remove('hidden');
+  revealLayer(elements.findBar);
   if (options.replace) setReplaceOpen(true);
   if (selected) elements.findInput.value = selected;
   refreshFindMatches({ reset: Boolean(selected), reveal: true });
@@ -3910,7 +4508,7 @@ function openFindBar(options = {}) {
 function closeFindBar() {
   if (!findState.open) return;
   findState.open = false;
-  elements.findBar.classList.add('hidden');
+  concealLayer(elements.findBar);
   restoreEditorFocus();
 }
 
@@ -4077,6 +4675,26 @@ function insertMarkdownSnippet(snippet) {
   scheduleCodeHighlight();
 }
 
+async function compressImageFile(file) {
+  if (!file || file.type.includes('svg') || file.type.includes('gif')) return file;
+  if (!String(file.type || '').startsWith('image/') || file.size < 350000) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1920 / Math.max(bitmap.width, 1));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+    bitmap.close?.();
+    if (!blob || blob.size >= file.size) return file;
+    const name = defaultPastedName(file).replace(/\.[^.]+$/, '.jpg');
+    return new File([blob], name, { type: 'image/jpeg' });
+  } catch {
+    return file;
+  }
+}
+
 async function insertImageFiles(files) {
   const images = [...files].filter(isImageFile);
   if (!images.length) return false;
@@ -4084,7 +4702,8 @@ async function insertImageFiles(files) {
 
   try {
     const snippets = [];
-    for (const file of images) {
+    for (const original of images) {
+      const file = await compressImageFile(original);
       const saved = await window.markl.saveImage({
         documentPath: state.filePath,
         name: defaultPastedName(file),
@@ -4124,6 +4743,7 @@ async function restoreOnStartup() {
   let launch = null;
   try {
     launch = await launchContextPromise;
+    appMenuDev = Boolean(launch?.dev);
     if (!launchHandled) {
       const session = readSession();
       if (launch?.file) {
@@ -4149,6 +4769,8 @@ async function restoreOnStartup() {
     persistSessionNow();
     updateCounts();
     renderHeadingTree();
+    renderPinnedList();
+    syncTemplateBar();
     scheduleImageResolve();
     if (findState.open) refreshFindMatches({ stay: true, reveal: false });
     focusEditor();
@@ -4172,7 +4794,7 @@ function createVditor() {
     mode: 'ir',
     height: '100%',
     lang: 'zh_CN',
-    theme: state.appearance.theme === 'dark' ? 'dark' : 'classic',
+    theme: DARK_THEMES.has(state.appearance.theme) ? 'dark' : 'classic',
     icon: 'ant',
     tab: '    ',
     // placeholder: '输入 # 加空格开始标题；输入三个反引号后回车，选择代码语言。',
@@ -4183,8 +4805,13 @@ function createVditor() {
     counter: { enable: false },
     preview: {
       delay: 80,
+      math: {
+        engine: 'KaTeX',
+        inlineDigit: false
+      },
       markdown: {
         sanitize: false,
+        mermaid: true,
         codeBlockPreview: true,
         mathBlockPreview: true,
         mark: true
@@ -4196,7 +4823,7 @@ function createVditor() {
         style: 'github'
       },
       theme: {
-        current: state.appearance.theme === 'dark' ? 'dark' : 'light',
+        current: DARK_THEMES.has(state.appearance.theme) ? 'dark' : 'light',
         path: CONTENT_THEME_PATH
       }
     },
@@ -4206,6 +4833,8 @@ function createVditor() {
       decorateCodeBlocks();
       watchCodeHighlight();
       scheduleTableToolbar();
+      renderTemplateBar();
+      renderPinnedList();
       restoreOnStartup();
     },
     input() {
@@ -4291,7 +4920,7 @@ function closeUpdatePanel({ dismiss = false, restoreFocus = true } = {}) {
   updateUi.open = false;
   updateUi.status = '';
   updateUi.payload = null;
-  elements.updatePanel.classList.add('hidden');
+  concealLayer(elements.updatePanel);
   elements.updatePanel.classList.remove('is-checking');
   if (restoreFocus) restoreEditorFocus();
 }
@@ -4403,7 +5032,7 @@ function showUpdatePanel(payload, { focus = false } = {}) {
   updateUi.status = next.status || 'error';
   updateUi.payload = next;
   renderUpdatePanel();
-  elements.updatePanel.classList.remove('hidden');
+  revealLayer(elements.updatePanel);
   if (focus) focusUpdatePanel();
 }
 
@@ -4506,7 +5135,22 @@ elements.findCase.addEventListener('click', () => {
   findState.caseSensitive = !findState.caseSensitive;
   elements.findCase.classList.toggle('is-active', findState.caseSensitive);
   elements.findCase.setAttribute('aria-pressed', String(findState.caseSensitive));
-  refreshFindMatches({ reset: true, reveal: true });
+  if (findState.open) refreshFindMatches({ stay: true });
+  if (state.sidebarTab === 'search') runWorkspaceSearch().catch(() => {});
+});
+elements.findWord?.addEventListener('click', () => {
+  findState.wholeWord = !findState.wholeWord;
+  elements.findWord.classList.toggle('is-active', findState.wholeWord);
+  elements.findWord.setAttribute('aria-pressed', String(findState.wholeWord));
+  if (findState.open) refreshFindMatches({ stay: true });
+  if (state.sidebarTab === 'search') runWorkspaceSearch().catch(() => {});
+});
+elements.findRegex?.addEventListener('click', () => {
+  findState.regex = !findState.regex;
+  elements.findRegex.classList.toggle('is-active', findState.regex);
+  elements.findRegex.setAttribute('aria-pressed', String(findState.regex));
+  if (findState.open) refreshFindMatches({ stay: true });
+  if (state.sidebarTab === 'search') runWorkspaceSearch().catch(() => {});
 });
 elements.findPrev.addEventListener('click', () => findStep(-1));
 elements.findNext.addEventListener('click', () => findStep(1));
@@ -4515,6 +5159,11 @@ elements.findToggleReplace.addEventListener('click', () => {
   if (findState.replaceOpen) elements.replaceInput.focus();
 });
 elements.findClose.addEventListener('click', closeFindBar);
+elements.workspaceReplaceAll?.addEventListener('click', () => {
+  replaceInWorkspace().catch((error) => showOperationError('文件夹替换', error));
+});
+elements.revisionClose?.addEventListener('click', () => concealLayer(elements.revisionPanel));
+elements.assetClose?.addEventListener('click', () => concealLayer(elements.assetPanel));
 elements.quickOpenInput.addEventListener('input', () => {
   quickOpen.selected = 0;
   refreshQuickOpenItems();
@@ -4639,6 +5288,352 @@ elements.tableSizeGrid.addEventListener('mouseleave', () => {
   renderTableSizePicker();
 });
 
+async function showAboutDialog() {
+  let version = '';
+  try {
+    version = await window.markl.getVersion();
+  } catch {
+    version = '';
+  }
+  showAppDialog({
+    title: version ? `MarkL ${version}` : 'MarkL',
+    message: '面向中文用户的轻量 Markdown 编辑器。支持目录管理、即时渲染和代码高亮。',
+    ok: '知道了'
+  });
+}
+
+const APP_MENU_ORDER = ['file', 'edit', 'view', 'theme', 'font', 'help'];
+let appMenuOpen = '';
+let appMenuIndex = 0;
+let appMenuDev = false;
+
+function appMenuItems(id) {
+  const theme = state.appearance.theme;
+  const font = state.appearance.font;
+  const size = state.appearance.fontSize;
+  if (id === 'file') {
+    return [
+      { label: '新建文档', accel: 'Ctrl+N', action: 'new' },
+      { label: '从模板新建…', action: 'new-template' },
+      { label: '打开文件…', accel: 'Ctrl+O', action: 'open' },
+      { label: '打开文件夹…', accel: 'Ctrl+Shift+O', action: 'open-folder' },
+      { label: '快速打开…', accel: 'Ctrl+P', action: 'quick-open' },
+      { type: 'sep' },
+      { label: '保存', accel: 'Ctrl+S', action: 'save' },
+      { label: '另存为…', accel: 'Ctrl+Shift+S', action: 'save-as' },
+      { type: 'sep' },
+      { label: '导出 HTML…', action: 'export-html' },
+      { label: '导出 PDF…', action: 'export-pdf' },
+      { label: '打印…', accel: 'Ctrl+Shift+P', action: 'print' },
+      { type: 'sep' },
+      { label: '本地历史…', action: 'revisions' },
+      { type: 'sep' },
+      { label: '退出 MarkL', action: 'quit' }
+    ];
+  }
+  if (id === 'edit') {
+    return [
+      { label: '撤销', accel: 'Ctrl+Z', action: 'undo' },
+      { label: '重做', accel: 'Ctrl+Y', action: 'redo' },
+      { type: 'sep' },
+      { label: '剪切', accel: 'Ctrl+X', action: 'cut' },
+      { label: '复制', accel: 'Ctrl+C', action: 'copy' },
+      { label: '粘贴', accel: 'Ctrl+V', action: 'paste' },
+      { label: '删除', action: 'delete' },
+      { type: 'sep' },
+      { label: '全选', accel: 'Ctrl+A', action: 'select-all' },
+      { type: 'sep' },
+      { label: '查找', accel: 'Ctrl+F', action: 'find' },
+      { label: '替换', accel: 'Ctrl+H', action: 'replace' },
+      { label: '在文件夹中查找', accel: 'Ctrl+Shift+F', action: 'workspace-search' },
+      { type: 'sep' },
+      { label: '格式化代码块', accel: 'Ctrl+Alt+L', action: 'format' },
+      { label: '整理中文排版', accel: 'Ctrl+Shift+L', action: 'typeset' },
+      { type: 'sep' },
+      { label: '插入已有图片…', action: 'insert-asset' },
+      { label: '清理未使用图片…', action: 'clean-images' }
+    ];
+  }
+  if (id === 'view') {
+    const items = [
+      { label: '切换即时渲染 / 源码', accel: 'Ctrl+/', action: 'toggle-mode' },
+      { label: '显示/隐藏目录栏', accel: 'Ctrl+B', action: 'toggle-sidebar' },
+      { type: 'sep' },
+      { label: '重新加载', action: 'reload' },
+      { label: '实际大小', action: 'zoom-reset' },
+      { label: '放大', action: 'zoom-in' },
+      { label: '缩小', action: 'zoom-out' },
+      { type: 'sep' },
+      { label: '切换全屏', action: 'fullscreen' }
+    ];
+    if (appMenuDev) items.push({ type: 'sep' }, { label: '开发者工具', action: 'devtools' });
+    return items;
+  }
+  if (id === 'theme') {
+    return THEME_IDS.map((id) => ({
+      label: THEME_LABELS[id],
+      action: 'theme',
+      value: id,
+      checked: theme === id,
+      swatch: THEME_SWATCHES[id]
+    }));
+  }
+  if (id === 'font') {
+    return [
+      { label: '默认', action: 'font', value: 'default', checked: font === 'default' },
+      { label: '微软雅黑', action: 'font', value: 'yahei', checked: font === 'yahei' },
+      { label: '宋体', action: 'font', value: 'song', checked: font === 'song' },
+      { label: '楷体', action: 'font', value: 'kai', checked: font === 'kai' },
+      { label: '仿宋', action: 'font', value: 'fangsong', checked: font === 'fangsong' },
+      { label: '黑体', action: 'font', value: 'hei', checked: font === 'hei' },
+      { label: '等线', action: 'font', value: 'deng', checked: font === 'deng' },
+      { type: 'sep' },
+      { label: '较小', action: 'font-size', value: 'small', checked: size === 'small' },
+      { label: '标准', action: 'font-size', value: 'medium', checked: size === 'medium' },
+      { label: '较大', action: 'font-size', value: 'large', checked: size === 'large' },
+      { label: '更大', action: 'font-size', value: 'xlarge', checked: size === 'xlarge' }
+    ];
+  }
+  return [
+    { label: '检查更新…', action: 'check-update' },
+    { type: 'sep' },
+    { label: '官网', action: 'website' },
+    { label: 'GitHub 仓库', action: 'github' },
+    { type: 'sep' },
+    { label: '关于 MarkL', action: 'about' }
+  ];
+}
+
+function runAppMenuAction(action, value) {
+  closeAppMenu();
+  const run = {
+    new: doNew,
+    open: doOpen,
+    'open-folder': doOpenFolder,
+    'quick-open': openQuickOpen,
+    save: doSave,
+    'save-as': doSaveAs,
+    'export-html': doExportHtml,
+    'export-pdf': doExportPdf,
+    'new-template': openTemplateMenu,
+    revisions: openRevisionPanel,
+    typeset: typesetCurrentDocument,
+    'insert-asset': openAssetPanel,
+    'clean-images': cleanUnusedImages,
+    print: () => (window.markl.printDocument ? window.markl.printDocument().catch(() => window.print()) : window.print()),
+    quit: () => window.markl.tryClose?.(),
+    undo: () => document.execCommand('undo'),
+    redo: () => document.execCommand('redo'),
+    cut: () => document.execCommand('cut'),
+    copy: () => document.execCommand('copy'),
+    paste: () => document.execCommand('paste'),
+    delete: () => document.execCommand('delete'),
+    'select-all': () => document.execCommand('selectAll'),
+    find: () => openFindBar({ replace: false }),
+    replace: () => openFindBar({ replace: true }),
+    'workspace-search': openWorkspaceSearch,
+    format: formatActiveCode,
+    'toggle-mode': toggleMode,
+    'toggle-sidebar': () => toggleSidebar(),
+    reload: () => window.markl.reloadWindow?.(),
+    'zoom-reset': () => window.markl.zoom?.('reset'),
+    'zoom-in': () => window.markl.zoom?.('in'),
+    'zoom-out': () => window.markl.zoom?.('out'),
+    fullscreen: () => window.markl.toggleFullScreen?.(),
+    devtools: () => window.markl.toggleDevTools?.(),
+    theme: () => setAppearance({ theme: value }),
+    font: () => setAppearance({ font: value }),
+    'font-size': () => setAppearance({ fontSize: value }),
+    'check-update': runManualUpdateCheck,
+    website: () => window.markl.openExternal('https://lcodecoder.github.io/markL/'),
+    github: () => window.markl.openExternal('https://github.com/LcodeCoder/markL'),
+    about: showAboutDialog
+  };
+  run[action]?.();
+}
+
+function selectableAppMenuItems(id) {
+  return appMenuItems(id).filter((item) => item.type !== 'sep');
+}
+
+function renderAppMenuDropdown(id) {
+  const menu = elements.appMenuDropdown;
+  if (!menu) return;
+  const items = appMenuItems(id);
+  menu.replaceChildren();
+  items.forEach((item) => {
+    if (item.type === 'sep') {
+      const sep = document.createElement('div');
+      sep.className = 'app-menu-sep';
+      menu.appendChild(sep);
+      return;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'app-menu-option';
+    button.role = 'menuitem';
+    if (item.checked) button.classList.add('is-checked');
+    const main = document.createElement('span');
+    main.className = 'app-menu-option-main';
+    const check = document.createElement('span');
+    check.className = 'app-menu-check';
+    check.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M3.4 8.2 6.5 11.2 12.6 4.8"/></svg>';
+    if (item.swatch) {
+      const swatch = document.createElement('span');
+      swatch.className = 'app-menu-swatch';
+      swatch.style.background = item.swatch;
+      main.append(check, swatch);
+    } else {
+      main.append(check);
+    }
+    const label = document.createElement('span');
+    label.className = 'app-menu-label';
+    label.textContent = item.label;
+    main.append(label);
+    button.append(main);
+    if (item.accel) {
+      const accel = document.createElement('span');
+      accel.className = 'app-menu-accel';
+      accel.textContent = item.accel;
+      button.append(accel);
+    }
+    button.addEventListener('mouseenter', () => {
+      const selectable = selectableAppMenuItems(id);
+      appMenuIndex = Math.max(0, selectable.findIndex((entry) => entry.label === item.label && entry.action === item.action));
+      highlightAppMenuOption();
+    });
+    button.addEventListener('click', () => runAppMenuAction(item.action, item.value));
+    menu.appendChild(button);
+  });
+  highlightAppMenuOption();
+}
+
+function highlightAppMenuOption() {
+  const options = [...(elements.appMenuDropdown?.querySelectorAll('.app-menu-option') || [])];
+  options.forEach((option, index) => option.classList.toggle('is-active', index === appMenuIndex));
+  options[appMenuIndex]?.scrollIntoView({ block: 'nearest' });
+}
+
+function positionAppMenu(id) {
+  const tab = elements.appMenubar?.querySelector(`[data-menu="${id}"]`);
+  const menu = elements.appMenuDropdown;
+  if (!tab || !menu) return;
+  const rect = tab.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.left = `${Math.max(8, rect.left)}px`;
+  const width = menu.offsetWidth || 228;
+  if (rect.left + width > window.innerWidth - 8) {
+    menu.style.left = `${Math.max(8, window.innerWidth - width - 8)}px`;
+  }
+}
+
+function closeAppMenu() {
+  if (!appMenuOpen) return;
+  appMenuOpen = '';
+  appMenuIndex = 0;
+  elements.appMenubar?.querySelectorAll('.app-menu-tab').forEach((tab) => {
+    tab.classList.remove('is-open');
+    tab.setAttribute('aria-expanded', 'false');
+  });
+  concealLayer(elements.appMenuDropdown);
+}
+
+function openAppMenu(id) {
+  if (!elements.appMenuDropdown) return;
+  appMenuOpen = id;
+  appMenuIndex = 0;
+  elements.appMenubar?.querySelectorAll('.app-menu-tab').forEach((tab) => {
+    const on = tab.dataset.menu === id;
+    tab.classList.toggle('is-open', on);
+    tab.setAttribute('aria-expanded', String(on));
+  });
+  renderAppMenuDropdown(id);
+  revealLayer(elements.appMenuDropdown);
+  positionAppMenu(id);
+}
+
+function toggleAppMenu(id) {
+  if (appMenuOpen === id) closeAppMenu();
+  else openAppMenu(id);
+}
+
+function syncAppMenuChecks() {
+  if (appMenuOpen === 'theme' || appMenuOpen === 'font') {
+    renderAppMenuDropdown(appMenuOpen);
+    positionAppMenu(appMenuOpen);
+  }
+}
+
+function handleAppMenuKey(event) {
+  if (!appMenuOpen) return false;
+  if (event.ctrlKey || event.metaKey) {
+    closeAppMenu();
+    return false;
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeAppMenu();
+    return true;
+  }
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault();
+    const at = APP_MENU_ORDER.indexOf(appMenuOpen);
+    const next = event.key === 'ArrowRight'
+      ? APP_MENU_ORDER[(at + 1) % APP_MENU_ORDER.length]
+      : APP_MENU_ORDER[(at + APP_MENU_ORDER.length - 1) % APP_MENU_ORDER.length];
+    openAppMenu(next);
+    return true;
+  }
+  const selectable = selectableAppMenuItems(appMenuOpen);
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    appMenuIndex = (appMenuIndex + 1) % selectable.length;
+    highlightAppMenuOption();
+    return true;
+  }
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    appMenuIndex = (appMenuIndex + selectable.length - 1) % selectable.length;
+    highlightAppMenuOption();
+    return true;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const item = selectable[appMenuIndex];
+    if (item) runAppMenuAction(item.action, item.value);
+    return true;
+  }
+  return false;
+}
+
+let altMenuArmed = false;
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Alt' && !event.ctrlKey && !event.metaKey) altMenuArmed = true;
+  else altMenuArmed = false;
+}, true);
+document.addEventListener('keyup', (event) => {
+  if (event.key === 'Control' || event.key === 'Meta') commitRecentSwitcher();
+  if (event.key !== 'Alt') return;
+  if (!altMenuArmed) return;
+  altMenuArmed = false;
+  event.preventDefault();
+  if (appMenuOpen) closeAppMenu();
+  else openAppMenu('file');
+});
+
+elements.appMenubar?.addEventListener('click', (event) => {
+  const tab = event.target.closest('.app-menu-tab');
+  if (!tab) return;
+  event.preventDefault();
+  toggleAppMenu(tab.dataset.menu);
+});
+
+elements.appMenubar?.addEventListener('mousemove', (event) => {
+  if (!appMenuOpen) return;
+  const tab = event.target.closest('.app-menu-tab');
+  if (tab?.dataset.menu && tab.dataset.menu !== appMenuOpen) openAppMenu(tab.dataset.menu);
+});
+
 window.markl.on('file:opened', async ({ filePath, content }) => {
   launchHandled = true;
   if (await confirmDiscardIfDirty()) loadContent(filePath, content);
@@ -4649,6 +5644,12 @@ window.markl.on('menu:open-folder', doOpenFolder);
 window.markl.on('menu:save', doSave);
 window.markl.on('menu:save-as', doSaveAs);
 window.markl.on('menu:export-html', doExportHtml);
+window.markl.on('menu:export-pdf', doExportPdf);
+window.markl.on('menu:new-template', openTemplateMenu);
+window.markl.on('menu:revisions', openRevisionPanel);
+window.markl.on('menu:typeset', typesetCurrentDocument);
+window.markl.on('menu:insert-asset', openAssetPanel);
+window.markl.on('menu:clean-images', cleanUnusedImages);
 window.markl.on('menu:print', () => {
   if (window.markl.printDocument) window.markl.printDocument().catch(() => window.print());
   else window.print();
@@ -4664,18 +5665,8 @@ window.markl.on('menu:replace', () => openFindBar({ replace: true }));
 window.markl.on('menu:workspace-search', () => openWorkspaceSearch());
 window.markl.on('menu:check-update', () => runManualUpdateCheck());
 window.markl.on('menu:quick-open', () => openQuickOpen());
-window.markl.on('menu:about', async () => {
-  let version = '';
-  try {
-    version = await window.markl.getVersion();
-  } catch {
-    version = '';
-  }
-  showAppDialog({
-    title: version ? `MarkL ${version}` : 'MarkL',
-    message: '面向中文用户的轻量 Markdown 编辑器。支持目录管理、即时渲染和代码高亮。',
-    ok: '知道了'
-  });
+window.markl.on('menu:about', () => {
+  showAboutDialog();
 });
 window.markl.on('fs:change', (payload) => handleFsChange(payload));
 window.markl.on('update:available', (payload) => {
@@ -4683,12 +5674,14 @@ window.markl.on('update:available', (payload) => {
   showUpdatePanel(payload, { focus: false });
 });
 window.markl.on('app:before-close', async () => {
+  if (state.filePath) rememberCaret(state.filePath);
   persistSessionNow();
   await persistDraftNow();
   if (await confirmDiscardIfDirty()) window.markl.doClose();
 });
 
 document.addEventListener('click', (event) => {
+  if (!event.target.closest('#app-menubar, #app-menu-dropdown')) closeAppMenu();
   if (!event.target.closest('.format-menu')) closeFormatMenu();
   if (state.sourceMode) return;
   scheduleCodeHighlight();
@@ -4715,6 +5708,7 @@ document.addEventListener('compositioncancel', () => {
 }, true);
 
 document.addEventListener('keydown', (event) => {
+  if (handleAppMenuKey(event)) return;
   if (isAppDialogOpen()) {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -4727,6 +5721,16 @@ document.addEventListener('keydown', (event) => {
   }
   const key = event.key.toLowerCase();
   const modifier = event.ctrlKey || event.metaKey;
+  if (event.key === 'Tab' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    cycleRecentFile(event.shiftKey);
+    return;
+  }
+  if (modifier && event.shiftKey && key === 'l' && !event.altKey) {
+    event.preventDefault();
+    typesetCurrentDocument();
+    return;
+  }
   if (modifier && key === 's') {
     event.preventDefault();
     if (event.shiftKey) doSaveAs();
@@ -4782,6 +5786,14 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && updateUi.open && !event.target.closest('#find-bar')) {
     event.preventDefault();
     closeUpdatePanel({ dismiss: updateUi.status === 'available' });
+  }
+  if (event.key === 'Escape' && elements.revisionPanel && !elements.revisionPanel.classList.contains('hidden')) {
+    event.preventDefault();
+    concealLayer(elements.revisionPanel);
+  }
+  if (event.key === 'Escape' && elements.assetPanel && !elements.assetPanel.classList.contains('hidden')) {
+    event.preventDefault();
+    concealLayer(elements.assetPanel);
   }
 }, true);
 

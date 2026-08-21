@@ -1,25 +1,73 @@
 export const FIND_MATCH_LIMIT = 5000;
 
-export function collectMatches(text, query, options = {}) {
-  const source = String(text || '');
+function isWordChar(ch) {
+  return /[A-Za-z0-9_\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(ch || '');
+}
+
+function isWholeWordBoundary(text, start, end) {
+  return (start <= 0 || !isWordChar(text[start - 1])) && (end >= text.length || !isWordChar(text[end]));
+}
+
+export function compileSearch(query, options = {}) {
   const needle = String(query || '');
-  if (!needle) return [];
-
-  const caseSensitive = Boolean(options.caseSensitive);
-  const haystack = caseSensitive ? source : source.toLowerCase();
-  const find = caseSensitive ? needle : needle.toLowerCase();
-  const matches = [];
-  let from = 0;
-
-  while (from <= haystack.length - find.length) {
-    const index = haystack.indexOf(find, from);
-    if (index === -1) break;
-    matches.push({ start: index, end: index + needle.length });
-    if (matches.length >= FIND_MATCH_LIMIT) break;
-    from = index + needle.length;
+  if (!needle) return { error: '', matches: () => [] };
+  if (options.regex) {
+    try {
+      const re = new RegExp(needle, options.caseSensitive ? 'g' : 'gi');
+      return {
+        error: '',
+        matches(text) {
+          const source = String(text || '');
+          const out = [];
+          re.lastIndex = 0;
+          let hit = re.exec(source);
+          while (hit) {
+            if (!hit[0]) {
+              re.lastIndex += 1;
+              hit = re.exec(source);
+              continue;
+            }
+            const start = hit.index;
+            const end = start + hit[0].length;
+            if (!options.wholeWord || isWholeWordBoundary(source, start, end)) {
+              out.push({ start, end });
+              if (out.length >= FIND_MATCH_LIMIT) break;
+            }
+            hit = re.exec(source);
+          }
+          return out;
+        }
+      };
+    } catch {
+      return { error: '正则无效', matches: () => [] };
+    }
   }
 
-  return matches;
+  return {
+    error: '',
+    matches(text) {
+      const source = String(text || '');
+      const haystack = options.caseSensitive ? source : source.toLowerCase();
+      const find = options.caseSensitive ? needle : needle.toLowerCase();
+      const out = [];
+      let from = 0;
+      while (from <= haystack.length - find.length) {
+        const index = haystack.indexOf(find, from);
+        if (index === -1) break;
+        const end = index + needle.length;
+        if (!options.wholeWord || isWholeWordBoundary(source, index, end)) {
+          out.push({ start: index, end });
+          if (out.length >= FIND_MATCH_LIMIT) break;
+        }
+        from = index + needle.length;
+      }
+      return out;
+    }
+  };
+}
+
+export function collectMatches(text, query, options = {}) {
+  return compileSearch(query, options).matches(text);
 }
 
 export function replaceRange(text, start, end, replacement) {
@@ -29,7 +77,9 @@ export function replaceRange(text, start, end, replacement) {
 
 export function replaceAllMatches(text, query, replacement, options = {}) {
   const source = String(text || '');
-  const matches = collectMatches(source, query, options);
+  const compiled = compileSearch(query, options);
+  if (compiled.error) return { text: source, count: 0, error: compiled.error };
+  const matches = compiled.matches(source);
   if (!matches.length) return { text: source, count: 0 };
 
   const insert = String(replacement ?? '');

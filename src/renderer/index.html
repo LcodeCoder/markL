@@ -8,9 +8,20 @@
   <title>MarkL</title>
   <link rel="stylesheet" href="../../node_modules/vditor/dist/index.css" />
   <link rel="stylesheet" href="../../node_modules/vditor/dist/js/highlight.js/styles/github.min.css" />
+  <link rel="stylesheet" href="../../node_modules/vditor/dist/js/katex/katex.min.css" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body class="theme-light">
+  <div id="app-root">
+  <nav id="app-menubar" role="menubar" aria-label="应用菜单">
+    <button class="app-menu-tab" type="button" role="menuitem" data-menu="file" aria-haspopup="true" aria-expanded="false">文件</button>
+    <button class="app-menu-tab" type="button" role="menuitem" data-menu="edit" aria-haspopup="true" aria-expanded="false">编辑</button>
+    <button class="app-menu-tab" type="button" role="menuitem" data-menu="view" aria-haspopup="true" aria-expanded="false">视图</button>
+    <button class="app-menu-tab" type="button" role="menuitem" data-menu="theme" aria-haspopup="true" aria-expanded="false">主题</button>
+    <button class="app-menu-tab" type="button" role="menuitem" data-menu="font" aria-haspopup="true" aria-expanded="false">字体</button>
+    <button class="app-menu-tab" type="button" role="menuitem" data-menu="help" aria-haspopup="true" aria-expanded="false">帮助</button>
+  </nav>
+  <div id="app-menu-dropdown" class="app-menu-dropdown hidden" role="menu" aria-label="菜单"></div>
   <div id="app-shell">
     <aside id="sidebar" aria-label="文档目录">
       <nav class="sidebar-rail" role="tablist" aria-label="侧栏视图">
@@ -48,6 +59,8 @@
           <span id="workspace-name"></span>
         </div>
 
+        <div id="pinned-list" class="pinned-list hidden" aria-label="钉住的文档"></div>
+
         <nav id="file-tree" class="file-tree" aria-label="文件列表">
           <div id="tree-empty" class="tree-empty">
             <p>还没有打开文件夹</p>
@@ -58,6 +71,7 @@
         <section id="open-history" class="open-history is-collapsed" aria-label="打开历史">
           <div class="history-heading">
             <button id="history-toggle" class="history-toggle" type="button" aria-expanded="false" aria-controls="history-list">
+              <svg class="history-chevron" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M6.2 4.6 9.6 8 6.2 11.4"/></svg>
               打开历史
             </button>
           <button id="clear-history-button" class="history-clear hidden" type="button" title="清空打开历史">
@@ -80,6 +94,10 @@
       <div id="search-panel" class="sidebar-panel hidden" role="tabpanel" aria-labelledby="tab-search">
         <div class="workspace-search-bar">
           <input id="workspace-search-input" class="workspace-search-input" type="text" placeholder="搜索文件名或正文" autocomplete="off" spellcheck="false" />
+        </div>
+        <div id="workspace-replace-bar" class="workspace-replace-bar hidden">
+          <input id="workspace-replace-input" class="workspace-search-input" type="text" placeholder="替换为" autocomplete="off" spellcheck="false" />
+          <button id="workspace-replace-all" class="workspace-replace-button" type="button">全部替换</button>
         </div>
         <div id="workspace-search-results" class="workspace-search-results" aria-label="搜索结果"></div>
       </div>
@@ -132,24 +150,24 @@
         <div id="table-toolbar" class="table-toolbar hidden" role="toolbar" aria-label="表格工具">
           <div class="table-toolbar-group">
             <button id="table-insert-button" type="button" data-table-action="toggle-insert" title="选择表格大小" aria-label="选择表格大小" aria-haspopup="dialog" aria-expanded="false">
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3.25 2A1.25 1.25 0 0 0 2 3.25v9.5A1.25 1.25 0 0 0 3.25 14h9.5A1.25 1.25 0 0 0 14 12.75v-9.5A1.25 1.25 0 0 0 12.75 2h-9.5ZM3.5 6.5h3v3h-3v-3Zm4.5 0h4.5v3H8v-3Zm-4.5 4.5h3v2.5H3.75a.25.25 0 0 1-.25-.25V11Zm4.5 0h4.5v2.25a.25.25 0 0 1-.25.25H8V11ZM6.5 3.5v1.5h-3V3.75c0-.138.112-.25.25-.25H6.5Zm1.5 0h4.25c.138 0 .25.112.25.25V5H8V3.5Z"/></svg>
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M3.25 3.25h9.5v9.5h-9.5z"/><path fill="none" stroke="currentColor" stroke-width="1.35" d="M3.25 6.4h9.5M3.25 9.6h9.5M6.4 3.25v9.5M9.6 3.25v9.5"/></svg>
             </button>
             <button type="button" data-table-action="align-left" title="当前列居左" aria-label="当前列居左">
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M2.25 3.15h11.5v1.2H2.25zm0 4.25h8.2v1.2h-8.2zm0 4.25h11.5v1.2H2.25z"/></svg>
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M2.8 4.2h10.4M2.8 8h7.2M2.8 11.8h10.4"/></svg>
             </button>
             <button type="button" data-table-action="align-center" title="当前列居中" aria-label="当前列居中">
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M2.25 3.15h11.5v1.2H2.25zm2.15 4.25h7.2v1.2h-7.2zM2.25 11.65h11.5v1.2H2.25z"/></svg>
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M2.8 4.2h10.4M4.4 8h7.2M2.8 11.8h10.4"/></svg>
             </button>
             <button type="button" data-table-action="align-right" title="当前列居右" aria-label="当前列居右">
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M2.25 3.15h11.5v1.2H2.25zm3.3 4.25h8.2v1.2h-8.2zM2.25 11.65h11.5v1.2H2.25z"/></svg>
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M2.8 4.2h10.4M6 8h7.2M2.8 11.8h10.4"/></svg>
             </button>
           </div>
           <div class="table-toolbar-group">
             <button id="table-more-button" type="button" data-table-action="toggle-more" title="更多" aria-label="更多" aria-haspopup="menu" aria-expanded="false">
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8 3.15a1.05 1.05 0 1 1 0 2.1 1.05 1.05 0 0 1 0-2.1Zm0 3.85a1.05 1.05 0 1 1 0 2.1 1.05 1.05 0 0 1 0-2.1Zm0 3.85a1.05 1.05 0 1 1 0 2.1 1.05 1.05 0 0 1 0-2.1Z"/></svg>
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="8" cy="4.15" r="0.95" fill="none" stroke="currentColor" stroke-width="1.35"/><circle cx="8" cy="8" r="0.95" fill="none" stroke="currentColor" stroke-width="1.35"/><circle cx="8" cy="11.85" r="0.95" fill="none" stroke="currentColor" stroke-width="1.35"/></svg>
             </button>
             <button type="button" class="is-danger" data-table-action="delete-table" title="删除表格" aria-label="删除表格">
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M6.15 2.35h3.7c.22 0 .42.15.48.36l.17.59H13a.7.7 0 0 1 0 1.4h-.4l-.58 6.72A1.7 1.7 0 0 1 10.33 13.3H5.67a1.7 1.7 0 0 1-1.69-1.88L3.4 4.7H3a.7.7 0 0 1 0-1.4h2.5l.17-.59a.5.5 0 0 1 .48-.36Zm.46 1.4-.08.25h2.94l-.08-.25H6.61ZM4.81 4.7l.56 6.54c.04.4.37.66.7.66h4.66c.33 0 .66-.26.7-.66L11.2 4.7H4.81Z"/></svg>
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M3.5 4.5h9M6.15 4.5 6.4 3.25h3.2L9.85 4.5M5.2 4.5l.55 7.4h4.5l.55-7.4"/></svg>
             </button>
           </div>
           <div id="table-insert-menu" class="table-menu table-size-picker hidden" role="dialog" aria-label="选择表格大小">
@@ -158,27 +176,27 @@
           </div>
           <div id="table-more-menu" class="table-menu table-menu-right hidden" role="menu" aria-label="更多表格操作">
             <button type="button" role="menuitem" data-table-action="insert-row-above">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="currentColor" d="M8 2.75a.75.75 0 0 1 .75.75v3.75H12.5a.75.75 0 0 1 0 1.5H8.75V12.5a.75.75 0 0 1-1.5 0V8.75H3.5a.75.75 0 0 1 0-1.5h3.75V3.5A.75.75 0 0 1 8 2.75Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M8 3.4v9.2M3.4 8h9.2"/></svg>
               在上方插入行
             </button>
             <button type="button" role="menuitem" data-table-action="insert-row-below">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="currentColor" d="M8 2.75a.75.75 0 0 1 .75.75v3.75H12.5a.75.75 0 0 1 0 1.5H8.75V12.5a.75.75 0 0 1-1.5 0V8.75H3.5a.75.75 0 0 1 0-1.5h3.75V3.5A.75.75 0 0 1 8 2.75Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M8 3.4v9.2M3.4 8h9.2"/></svg>
               在下方插入行
             </button>
             <button type="button" role="menuitem" data-table-action="insert-col-left">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="currentColor" d="M8 2.75a.75.75 0 0 1 .75.75v3.75H12.5a.75.75 0 0 1 0 1.5H8.75V12.5a.75.75 0 0 1-1.5 0V8.75H3.5a.75.75 0 0 1 0-1.5h3.75V3.5A.75.75 0 0 1 8 2.75Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M8 3.4v9.2M3.4 8h9.2"/></svg>
               在左侧插入列
             </button>
             <button type="button" role="menuitem" data-table-action="insert-col-right">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="currentColor" d="M8 2.75a.75.75 0 0 1 .75.75v3.75H12.5a.75.75 0 0 1 0 1.5H8.75V12.5a.75.75 0 0 1-1.5 0V8.75H3.5a.75.75 0 0 1 0-1.5h3.75V3.5A.75.75 0 0 1 8 2.75Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M8 3.4v9.2M3.4 8h9.2"/></svg>
               在右侧插入列
             </button>
             <button type="button" role="menuitem" data-table-action="delete-row">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="currentColor" d="M11 1.75a.75.75 0 0 1 .75.75v.75h1a.75.75 0 0 1 0 1.5h-1v.75a.75.75 0 0 1-1.5 0v-.75h-1a.75.75 0 0 1 0-1.5h1V2.5A.75.75 0 0 1 11 1.75ZM1.5 5.25A1.75 1.75 0 0 1 3.25 3.5h4a.75.75 0 0 1 0 1.5h-4a.25.25 0 0 0-.25.25v6.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25v-4a.75.75 0 0 1 1.5 0v4A1.75 1.75 0 0 1 12.75 13.5h-9.5A1.75 1.75 0 0 1 1.5 11.75v-6.5ZM5.22 7.97a.75.75 0 0 1 1.06 0L8 9.69l1.72-1.72a.75.75 0 1 1 1.06 1.06L9.06 10.75l1.72 1.72a.75.75 0 1 1-1.06 1.06L8 11.81l-1.72 1.72a.75.75 0 0 1-1.06-1.06l1.72-1.72-1.72-1.72a.75.75 0 0 1 0-1.06Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M4.4 4.4 11.6 11.6M11.6 4.4 4.4 11.6"/></svg>
               删除当前行
             </button>
             <button type="button" role="menuitem" data-table-action="delete-column">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="currentColor" d="M4.75 1.75a.75.75 0 0 1 .75.75v1h.75a.75.75 0 0 1 0 1.5H5.5v.75a.75.75 0 0 1-1.5 0V5h-.75a.75.75 0 0 1 0-1.5H4V2.5a.75.75 0 0 1 .75-.75ZM1.5 8A1.75 1.75 0 0 1 3.25 6.25v-.5a.75.75 0 0 1 1.5 0v.5h.5a.75.75 0 0 1 0 1.5H4.75v.5a.75.75 0 0 1-1.5 0v-.5H3.25A.25.25 0 0 0 3 7.75v4.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V7.75a.25.25 0 0 0-.25-.25H9.25a.75.75 0 0 1 0-1.5h3.5A1.75 1.75 0 0 1 14.5 7.75v4.5A1.75 1.75 0 0 1 12.75 14h-9.5A1.75 1.75 0 0 1 1.5 12.25V8Zm5.72.22a.75.75 0 0 1 1.06 0L10 9.94l1.72-1.72a.75.75 0 1 1 1.06 1.06L11.06 11l1.72 1.72a.75.75 0 1 1-1.06 1.06L10 12.06l-1.72 1.72a.75.75 0 0 1-1.06-1.06L8.94 11 7.22 9.28a.75.75 0 0 1 0-1.06Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" style="margin-right:6px"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M4.4 4.4 11.6 11.6M11.6 4.4 4.4 11.6"/></svg>
               删除当前列
             </button>
           </div>
@@ -196,27 +214,29 @@
             <input id="find-input" class="find-input" type="text" placeholder="查找" autocomplete="off" spellcheck="false" />
             <span id="find-count" class="find-count" aria-live="polite"></span>
             <button id="find-case" type="button" title="区分大小写" aria-label="区分大小写" aria-pressed="false">Aa</button>
+            <button id="find-word" type="button" title="全词匹配" aria-label="全词匹配" aria-pressed="false">W</button>
+            <button id="find-regex" type="button" title="正则表达式" aria-label="正则表达式" aria-pressed="false">.*</button>
             <button id="find-prev" type="button" title="上一个（Shift+Enter）" aria-label="上一个">
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 3.2 3.4 7.8a.7.7 0 1 0 1 1L7.3 5.9V12.5a.7.7 0 1 0 1.4 0V5.9l2.9 2.9a.7.7 0 1 0 1-1z"/></svg>
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M4.3 9.1 8 5.4l3.7 3.7"/></svg>
             </button>
             <button id="find-next" type="button" title="下一个（Enter）" aria-label="下一个">
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 12.8 3.4 8.2a.7.7 0 1 1 1-1l2.9 2.9V3.5a.7.7 0 1 1 1.4 0v6.6l2.9-2.9a.7.7 0 1 1 1 1z"/></svg>
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M4.3 6.9 8 10.6l3.7-3.7"/></svg>
             </button>
             <button id="find-toggle-replace" type="button" title="显示替换" aria-label="显示替换" aria-expanded="false">
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M3.2 5.2 8 10l4.8-4.8-.9-.9L8 8.2 4.1 4.3z"/></svg>
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M4.3 6.2 8 9.9l3.7-3.7"/></svg>
             </button>
             <button id="find-close" type="button" title="关闭（Esc）" aria-label="关闭查找">
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="m4.2 3.2 3.8 3.8 3.8-3.8.9.9L8.9 8l3.8 3.8-.9.9L8 8.9l-3.8 3.8-.9-.9L7.1 8 3.3 4.2z"/></svg>
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M4.4 4.4 11.6 11.6M11.6 4.4 4.4 11.6"/></svg>
             </button>
           </div>
           <div id="replace-row" class="find-row replace-row hidden">
             <input id="replace-input" class="find-input" type="text" placeholder="替换为" autocomplete="off" spellcheck="false" />
             <button id="replace-one" class="find-text-button" type="button" title="替换当前（Ctrl+Alt+Enter）">
-              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M3.75 3.5a.25.25 0 0 0-.25.25v2.19l1.22-1.22a.75.75 0 0 1 1.06 1.06L4.06 7.53a.75.75 0 0 1-1.06 0L1.22 5.78a.75.75 0 0 1 1.06-1.06l.72.72V3.75A1.75 1.75 0 0 1 4.75 2h2.5a.75.75 0 0 1 0 1.5h-2.5Zm9.5 9a.25.25 0 0 1-.25.25h-2.5a.75.75 0 0 0 0 1.5h2.5A1.75 1.75 0 0 0 14.75 12.5v-2.19l.72.72a.75.75 0 1 0 1.06-1.06l-1.78-1.78a.75.75 0 0 0-1.06 0l-1.78 1.78a.75.75 0 1 0 1.06 1.06l1.22-1.22v2.19Z"/></svg>
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M4.2 6.2H9M7.1 4.2 9.2 6.2 7.1 8.2M11.8 9.8H7M9.9 7.8 11.8 9.8 9.9 11.8"/></svg>
               替换
             </button>
             <button id="replace-all" class="find-text-button" type="button" title="全部替换">
-              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M3.75 3.5a.25.25 0 0 0-.25.25v2.19l1.22-1.22a.75.75 0 0 1 1.06 1.06L4.06 7.53a.75.75 0 0 1-1.06 0L1.22 5.78a.75.75 0 0 1 1.06-1.06l.72.72V3.75A1.75 1.75 0 0 1 4.75 2h2.5a.75.75 0 0 1 0 1.5h-2.5Zm9.5 9a.25.25 0 0 1-.25.25h-2.5a.75.75 0 0 0 0 1.5h2.5A1.75 1.75 0 0 0 14.75 12.5v-2.19l.72.72a.75.75 0 1 0 1.06-1.06l-1.78-1.78a.75.75 0 0 0-1.06 0l-1.78 1.78a.75.75 0 1 0 1.06 1.06l1.22-1.22v2.19Z"/></svg>
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M4.2 6.2H9M7.1 4.2 9.2 6.2 7.1 8.2M11.8 9.8H7M9.9 7.8 11.8 9.8 9.9 11.8"/></svg>
               全部替换
             </button>
           </div>
@@ -226,7 +246,7 @@
             <img src="../../assets/logo-mark.png" alt="" width="18" height="18" />
             <h2 id="update-title">检查更新</h2>
             <button id="update-close" class="update-icon-btn" type="button" title="关闭" aria-label="关闭">
-              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="m4.2 3.2 3.8 3.8 3.8-3.8.9.9L8.9 8l3.8 3.8-.9.9L8 8.9l-3.8 3.8-.9-.9L7.1 8 3.3 4.2z"/></svg>
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M4.4 4.4 11.6 11.6M11.6 4.4 4.4 11.6"/></svg>
             </button>
           </div>
           <div class="update-body">
@@ -242,27 +262,27 @@
           </div>
           <div id="update-actions" class="update-actions">
             <button id="update-download" class="update-download hidden" type="button">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M7.47 10.78a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V1.75a.75.75 0 0 0-1.5 0v6.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5ZM2.75 13.25a.75.75 0 0 0 0 1.5h10.5a.75.75 0 0 0 0-1.5H2.75Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M8 3.2v7.1M5.3 7.7 8 10.4l2.7-2.7M3.4 12.7h9.2"/></svg>
               下载绿色版
             </button>
             <button id="update-setup" class="text-button hidden" type="button">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M7.47 10.78a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V1.75a.75.75 0 0 0-1.5 0v6.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5ZM2.75 13.25a.75.75 0 0 0 0 1.5h10.5a.75.75 0 0 0 0-1.5H2.75Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M8 3.2v7.1M5.3 7.7 8 10.4l2.7-2.7M3.4 12.7h9.2"/></svg>
               下载安装版
             </button>
             <button id="update-retry" class="text-button hidden" type="button">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M3.2 8a4.8 4.8 0 0 1 8.14-3.4l.76-.76A.7.7 0 0 1 13.3 4.3v2.5a.6.6 0 0 1-.6.6H10.2a.7.7 0 0 1-.5-1.2l.7-.7A3.4 3.4 0 1 0 11.4 9.7a.7.7 0 1 1 1.24.64A4.8 4.8 0 0 1 3.2 8Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M3.3 8a4.7 4.7 0 0 1 7.95-3.35l.75-.75M12.75 2.7v2.85h-2.85M12.7 8a4.7 4.7 0 0 1-7.95 3.35l-.75.75M3.25 13.3V10.45h2.85"/></svg>
               再试一次
             </button>
             <button id="update-later" class="text-button hidden" type="button">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 1.5a5.5 5.5 0 1 1 0 11A5.5 5.5 0 0 1 8 2.5ZM8.75 5a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .22.53l2 2a.75.75 0 1 0 1.06-1.06l-1.78-1.78V5Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="5.2" fill="none" stroke="currentColor" stroke-width="1.35"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M8 5.2v3.15l2.15 1.35"/></svg>
               稍后
             </button>
             <button id="update-ok" class="text-button hidden" type="button">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M13.78 3.47a.75.75 0 0 1 0 1.06l-7.5 7.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06L6 10.69l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="M3.4 8.2 6.5 11.2 12.6 4.8"/></svg>
               确定
             </button>
             <button id="update-release" class="update-link hidden" type="button">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M10.604 1h4.146a.25.25 0 0 1 .25.25v4.146a.25.25 0 0 1-.427.177L13.03 4.03 9.28 7.78a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042l3.75-3.75-1.543-1.543A.25.25 0 0 1 10.604 1ZM3.75 2A1.75 1.75 0 0 0 2 3.75v8.5c0 .966.784 1.75 1.75 1.75h8.5A1.75 1.75 0 0 0 14 12.25v-3.5a.75.75 0 0 0-1.5 0v3.5a.25.25 0 0 1-.25.25h-8.5a.25.25 0 0 1-.25-.25v-8.5a.25.25 0 0 1 .25-.25h3.5a.75.75 0 0 0 0-1.5h-3.5Z"/></svg>
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M6.5 3.3H3.4v9.3h9.3V9.7"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M9.3 3.3h3.4v3.4M12.5 3.5 8.1 7.9"/></svg>
               GitHub Release
             </button>
           </div>
@@ -302,10 +322,10 @@
             </button>
             <span class="format-menu-gap"></span>
             <button type="button" data-format="ul" title="无序列表" aria-label="无序列表">
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3.2 4.15h1.3v1.3H3.2zm0 3.2h1.3v1.3H3.2zm0 3.2h1.3v1.3H3.2z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M6.5 4.8h6.3M6.5 8h6.3M6.5 11.2h6.3"/></svg>
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="3.85" cy="4.8" r="0.85" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="3.85" cy="8" r="0.85" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="3.85" cy="11.2" r="0.85" fill="none" stroke="currentColor" stroke-width="1.2"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M6.5 4.8h6.3M6.5 8h6.3M6.5 11.2h6.3"/></svg>
             </button>
             <button type="button" data-format="ol" title="有序列表" aria-label="有序列表">
-              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M3.05 3.55h1.7v.85H3.85v.15h.7v.75h-.7v.2h.95v.85H3.05zm0 4.55h1.7v.8H3.85V9.1h.9v.8h-1.7zm0 3.15h1.7v.8H3.85v.2h.9v.8H3.05z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M6.6 4.8h6.2M6.6 8h6.2M6.6 11.2h6.2"/></svg>
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M3.2 4.4h1.5M3.2 8h1.5M3.2 11.6h1.5M6.6 4.8h6.2M6.6 8h6.2M6.6 11.2h6.2"/></svg>
             </button>
             <button type="button" data-format="task" title="任务列表" aria-label="任务列表">
               <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M3.15 3.35h3.4v3.4h-3.4z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" d="m3.55 5.05 1.05 1.05 1.7-1.85M8.2 4.8h4.7M3.2 10.9h9.7"/></svg>
@@ -317,6 +337,29 @@
           </div>
         </div>
         <div id="drop-mask" class="drop-mask" aria-hidden="true">放到这里打开文档或插入图片</div>
+        <div id="template-bar" class="template-bar hidden" aria-label="从模板新建">
+          <span class="template-bar-label">从模板开始</span>
+          <div id="template-bar-actions" class="template-bar-actions"></div>
+        </div>
+        <div id="recent-switcher" class="recent-switcher hidden" role="listbox" aria-label="最近文档"></div>
+        <div id="revision-panel" class="update-panel hidden" role="dialog" aria-label="本地历史">
+          <div class="update-head">
+            <h2>本地历史</h2>
+            <button id="revision-close" class="update-icon-btn" type="button" title="关闭" aria-label="关闭">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M4.4 4.4 11.6 11.6M11.6 4.4 4.4 11.6"/></svg>
+            </button>
+          </div>
+          <div id="revision-list" class="revision-list"></div>
+        </div>
+        <div id="asset-panel" class="update-panel hidden" role="dialog" aria-label="已有图片">
+          <div class="update-head">
+            <h2>插入已有图片</h2>
+            <button id="asset-close" class="update-icon-btn" type="button" title="关闭" aria-label="关闭">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M4.4 4.4 11.6 11.6M11.6 4.4 4.4 11.6"/></svg>
+            </button>
+          </div>
+          <div id="asset-list" class="asset-list"></div>
+        </div>
       </section>
 
       <footer id="statusbar">
@@ -338,13 +381,14 @@
       </footer>
     </main>
   </div>
+  </div>
 
   <div id="app-dialog" class="app-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title">
     <div class="app-dialog-backdrop" id="app-dialog-backdrop"></div>
     <div class="app-dialog-card">
       <div class="app-dialog-header">
         <div id="app-dialog-icon" class="app-dialog-icon is-info" aria-hidden="true">
-          <svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 0 13A6.5 6.5 0 0 0 8 1.5ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm6.5-.25A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>
+          <svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="5.4" fill="none" stroke="currentColor" stroke-width="1.35"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M8 7.15v4.05M8 5.2v.25"/></svg>
         </div>
         <h2 id="app-dialog-title">提示</h2>
       </div>

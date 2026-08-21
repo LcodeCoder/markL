@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog, shell, net, nativeTheme, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { pathToFileURL, fileURLToPath } = require('url');
 
 const APP_ID = 'com.haiyu.markl';
@@ -90,10 +91,14 @@ let currentAppearance = { theme: 'light', font: 'default', fontSize: 'medium' };
 
 const WINDOW_BG = {
   light: '#f4f5f7',
+  mist: '#eef3f6',
+  sepia: '#e8dfcc',
   dark: '#22262d',
-  sepia: '#e8dfcc'
+  ink: '#12141a',
+  dusk: '#1b2430'
 };
-const THEME_IDS = new Set(['light', 'dark', 'sepia']);
+const DARK_THEMES = new Set(['dark', 'ink', 'dusk']);
+const THEME_IDS = new Set(['light', 'mist', 'sepia', 'dark', 'ink', 'dusk']);
 const FONT_IDS = new Set(['default', 'yahei', 'song', 'kai', 'fangsong', 'hei', 'deng']);
 const FONT_SIZE_IDS = new Set(['small', 'medium', 'large', 'xlarge']);
 
@@ -184,16 +189,16 @@ function schedulePersistWindowState() {
 
 function applyNativeAppearance(value, options = {}) {
   currentAppearance = normalizeAppearance(value);
-  nativeTheme.themeSource = currentAppearance.theme === 'dark' ? 'dark' : 'light';
+  nativeTheme.themeSource = DARK_THEMES.has(currentAppearance.theme) ? 'dark' : 'light';
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setBackgroundColor(WINDOW_BG[currentAppearance.theme]);
+    mainWindow.setBackgroundColor(WINDOW_BG[currentAppearance.theme] || WINDOW_BG.light);
   }
   if (options.persist) writeAppearance(currentAppearance);
   if (options.rebuildMenu) buildMenu();
 }
 
 const DOCUMENT_RE = /\.(md|markdown|txt)$/i;
-const WRITEABLE_RE = /\.(md|markdown|txt|html)$/i;
+const WRITEABLE_RE = /\.(md|markdown|txt|html|pdf)$/i;
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico', '.avif']);
 const IMAGE_MIME = {
   '.png': 'image/png',
@@ -790,8 +795,13 @@ function buildMenu() {
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: send('menu:save') },
         { label: '另存为…', accelerator: 'CmdOrCtrl+Shift+S', click: send('menu:save-as') },
         { type: 'separator' },
+        { label: '从模板新建…', click: send('menu:new-template') },
+        { type: 'separator' },
         { label: '导出 HTML…', click: send('menu:export-html') },
+        { label: '导出 PDF…', click: send('menu:export-pdf') },
         { label: '打印…', accelerator: 'CmdOrCtrl+Shift+P', click: send('menu:print') },
+        { type: 'separator' },
+        { label: '本地历史…', click: send('menu:revisions') },
         { type: 'separator' },
         { role: 'quit', label: '退出 MarkL' }
       ]
@@ -813,7 +823,11 @@ function buildMenu() {
         { label: '替换', accelerator: 'CmdOrCtrl+H', click: send('menu:replace') },
         { label: '在文件夹中查找', accelerator: 'CmdOrCtrl+Shift+F', click: send('menu:workspace-search') },
         { type: 'separator' },
-        { label: '格式化代码块', accelerator: 'Ctrl+Alt+L', click: send('menu:format') }
+        { label: '格式化代码块', accelerator: 'Ctrl+Alt+L', click: send('menu:format') },
+        { label: '整理中文排版', accelerator: 'Ctrl+Shift+L', click: send('menu:typeset') },
+        { type: 'separator' },
+        { label: '插入已有图片…', click: send('menu:insert-asset') },
+        { label: '清理未使用图片…', click: send('menu:clean-images') }
       ]
     },
     {
@@ -836,24 +850,12 @@ function buildMenu() {
     {
       label: '主题',
       submenu: [
-        {
-          label: '浅色',
-          type: 'radio',
-          checked: currentAppearance.theme === 'light',
-          click: () => mainWindow?.webContents.send('menu:theme', 'light')
-        },
-        {
-          label: '深色',
-          type: 'radio',
-          checked: currentAppearance.theme === 'dark',
-          click: () => mainWindow?.webContents.send('menu:theme', 'dark')
-        },
-        {
-          label: '护眼',
-          type: 'radio',
-          checked: currentAppearance.theme === 'sepia',
-          click: () => mainWindow?.webContents.send('menu:theme', 'sepia')
-        }
+        { label: '浅色', type: 'radio', checked: currentAppearance.theme === 'light', click: () => mainWindow?.webContents.send('menu:theme', 'light') },
+        { label: '青雾', type: 'radio', checked: currentAppearance.theme === 'mist', click: () => mainWindow?.webContents.send('menu:theme', 'mist') },
+        { label: '护眼', type: 'radio', checked: currentAppearance.theme === 'sepia', click: () => mainWindow?.webContents.send('menu:theme', 'sepia') },
+        { label: '深色', type: 'radio', checked: currentAppearance.theme === 'dark', click: () => mainWindow?.webContents.send('menu:theme', 'dark') },
+        { label: '墨夜', type: 'radio', checked: currentAppearance.theme === 'ink', click: () => mainWindow?.webContents.send('menu:theme', 'ink') },
+        { label: '海暮', type: 'radio', checked: currentAppearance.theme === 'dusk', click: () => mainWindow?.webContents.send('menu:theme', 'dusk') }
       ]
     },
     {
@@ -991,10 +993,59 @@ function toWorkspaceRelative(rootPath, filePath) {
   return relative || path.basename(filePath);
 }
 
-ipcMain.handle('workspace:search', async (_event, { rootPath, query }) => {
+function isSearchWordChar(ch) {
+  return /[A-Za-z0-9_\u3400-\u9fff]/.test(ch || '');
+}
+
+function findInLine(line, needle, options = {}) {
+  const hits = [];
+  if (!needle) return hits;
+  if (options.regex) {
+    try {
+      const re = new RegExp(needle, options.caseSensitive ? 'g' : 'gi');
+      let hit = re.exec(line);
+      while (hit) {
+        if (!hit[0]) {
+          re.lastIndex += 1;
+          hit = re.exec(line);
+          continue;
+        }
+        hits.push(hit.index);
+        if (hits.length >= 20) break;
+        hit = re.exec(line);
+      }
+    } catch {
+      return hits;
+    }
+    return hits;
+  }
+  const haystack = options.caseSensitive ? line : line.toLowerCase();
+  const find = options.caseSensitive ? needle : needle.toLowerCase();
+  let from = 0;
+  while (from <= haystack.length - find.length) {
+    const column = haystack.indexOf(find, from);
+    if (column === -1) break;
+    const end = column + needle.length;
+    const whole = !options.wholeWord
+      || ((column === 0 || !isSearchWordChar(line[column - 1])) && (end >= line.length || !isSearchWordChar(line[end])));
+    if (whole) hits.push(column);
+    from = column + needle.length;
+  }
+  return hits;
+}
+
+ipcMain.handle('workspace:search', async (_event, { rootPath, query, caseSensitive, wholeWord, regex }) => {
   const needle = String(query || '').trim();
   const root = path.resolve(rootPath || currentWorkspace || '');
   if (!needle || !root || !fs.existsSync(root)) return { names: [], contents: [] };
+  const options = { caseSensitive: Boolean(caseSensitive), wholeWord: Boolean(wholeWord), regex: Boolean(regex) };
+  if (options.regex) {
+    try {
+      RegExp(needle, options.caseSensitive ? 'g' : 'gi');
+    } catch {
+      return { names: [], contents: [], error: '正则无效' };
+    }
+  }
 
   const find = needle.toLowerCase();
   const names = [];
@@ -1007,7 +1058,16 @@ ipcMain.handle('workspace:search', async (_event, { rootPath, query }) => {
   function considerName(type, name, fullPath) {
     if (names.length >= maxNames) return;
     const rel = toWorkspaceRelative(root, fullPath);
-    if (!name.toLowerCase().includes(find) && !rel.toLowerCase().includes(find)) return;
+    if (options.regex) {
+      try {
+        const re = new RegExp(needle, options.caseSensitive ? '' : 'i');
+        if (!re.test(name) && !re.test(rel)) return;
+      } catch {
+        return;
+      }
+    } else if (!name.toLowerCase().includes(find) && !rel.toLowerCase().includes(find)) {
+      return;
+    }
     names.push({ type, name, path: fullPath, relative: rel });
   }
 
@@ -1030,11 +1090,8 @@ ipcMain.handle('workspace:search', async (_event, { rootPath, query }) => {
     const relative = toWorkspaceRelative(root, fullPath);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
-      const haystack = line.toLowerCase();
-      let from = 0;
-      while (from <= haystack.length - find.length) {
-        const column = haystack.indexOf(find, from);
-        if (column === -1) break;
+      const columns = findInLine(line, needle, options);
+      for (const column of columns) {
         contents.push({
           name,
           path: fullPath,
@@ -1044,7 +1101,6 @@ ipcMain.handle('workspace:search', async (_event, { rootPath, query }) => {
           text: line.replace(/\s+/g, ' ').trim().slice(0, 180)
         });
         if (contents.length >= maxContents) return;
-        from = column + find.length;
       }
     }
   }
@@ -1103,6 +1159,135 @@ ipcMain.handle('dialog:export-html', async (_event, { defaultPath }) => {
   if (result.canceled || !result.filePath) return null;
   authorizeWritePath(result.filePath);
   return result.filePath;
+});
+
+ipcMain.handle('dialog:export-pdf', async (_event, { defaultPath }) => {
+  const name = (defaultPath || '未命名').replace(/\.(md|markdown|txt|html|pdf)$/i, '');
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: '导出 PDF',
+    defaultPath: `${name}.pdf`,
+    filters: [{ name: 'PDF 文件', extensions: ['pdf'] }]
+  });
+  focusMainWindow();
+  if (result.canceled || !result.filePath) return null;
+  authorizeWritePath(result.filePath);
+  return result.filePath;
+});
+
+function revisionRoot() {
+  return path.join(app.getPath('userData'), 'revisions');
+}
+
+function revisionKey(filePath) {
+  return crypto.createHash('sha1').update(String(path.resolve(filePath)).toLowerCase()).digest('hex');
+}
+
+ipcMain.handle('revision:save', async (_event, { filePath, content }) => {
+  if (!filePath || content == null) return false;
+  const dir = path.join(revisionRoot(), revisionKey(filePath));
+  fs.mkdirSync(dir, { recursive: true });
+  const stamp = Date.now();
+  fs.writeFileSync(path.join(dir, `${stamp}.md`), String(content), 'utf8');
+  fs.writeFileSync(path.join(dir, 'path.txt'), path.resolve(filePath), 'utf8');
+  const files = fs.readdirSync(dir).filter((name) => name.endsWith('.md')).sort();
+  while (files.length > 10) {
+    const old = files.shift();
+    fs.unlinkSync(path.join(dir, old));
+  }
+  return true;
+});
+
+ipcMain.handle('revision:list', async (_event, { filePath }) => {
+  if (!filePath) return [];
+  const dir = path.join(revisionRoot(), revisionKey(filePath));
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((name) => name.endsWith('.md')).sort().reverse().map((name) => {
+    const full = path.join(dir, name);
+    const stat = fs.statSync(full);
+    const stamp = Number(path.basename(name, '.md'));
+    const preview = fs.readFileSync(full, 'utf8').slice(0, 220).replace(/\s+/g, ' ').trim();
+    return { id: name, at: stamp || stat.mtimeMs, bytes: stat.size, preview };
+  });
+});
+
+ipcMain.handle('revision:read', async (_event, { filePath, id }) => {
+  if (!filePath || !id) throw new Error('没有这条历史。');
+  const dir = path.join(revisionRoot(), revisionKey(filePath));
+  const full = path.join(dir, path.basename(String(id)));
+  if (!full.startsWith(dir) || !full.endsWith('.md') || !fs.existsSync(full)) {
+    throw new Error('没有这条历史。');
+  }
+  return fs.readFileSync(full, 'utf8');
+});
+
+ipcMain.handle('image:list-assets', async (_event, { documentPath }) => {
+  if (!documentPath) return [];
+  const dir = path.join(path.dirname(path.resolve(documentPath)), 'assets');
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return [];
+  return fs.readdirSync(dir).flatMap((name) => {
+    const ext = path.extname(name).toLowerCase();
+    if (!IMAGE_EXTENSIONS.has(ext)) return [];
+    const full = path.join(dir, name);
+    try {
+      const stat = fs.statSync(full);
+      if (!stat.isFile()) return [];
+      return [{
+        name,
+        path: full,
+        relative: toPosixRelative(path.dirname(path.resolve(documentPath)), full),
+        fileUrl: pathToFileURL(full).href,
+        bytes: stat.size
+      }];
+    } catch {
+      return [];
+    }
+  });
+});
+
+ipcMain.handle('image:delete-files', async (_event, { documentPath, names }) => {
+  if (!documentPath) return [];
+  const dir = path.join(path.dirname(path.resolve(documentPath)), 'assets');
+  const deleted = [];
+  for (const raw of names || []) {
+    const base = path.basename(String(raw || ''));
+    if (!IMAGE_EXTENSIONS.has(path.extname(base).toLowerCase())) continue;
+    const full = path.join(dir, base);
+    if (!fs.existsSync(full) || !fs.statSync(full).isFile()) continue;
+    noteOwnWrite(full);
+    fs.unlinkSync(full);
+    deleted.push(base);
+  }
+  return deleted;
+});
+
+ipcMain.handle('export:pdf', async (_event, { filePath, html }) => {
+  if (!filePath) throw new Error('缺少保存路径。');
+  let dest = path.resolve(filePath);
+  if (!dest.toLowerCase().endsWith('.pdf')) dest += '.pdf';
+  authorizeWritePath(dest);
+  const resolved = assertAuthorizedWrite(dest);
+  const tmp = path.join(app.getPath('temp'), `markl-print-${Date.now()}.html`);
+  fs.writeFileSync(tmp, String(html || ''), 'utf8');
+  const win = new BrowserWindow({
+    show: false,
+    width: 900,
+    height: 1200,
+    webPreferences: { sandbox: true }
+  });
+  try {
+    await win.loadFile(tmp);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const data = await win.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'A4',
+      margins: { top: 0.5, bottom: 0.5, left: 0.55, right: 0.55 }
+    });
+    fs.writeFileSync(resolved, data);
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+  }
+  return resolved;
 });
 
 ipcMain.handle('file:write', async (_event, { filePath, content }) => {
@@ -1271,7 +1456,7 @@ ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('app:launch-context', async () => {
   const document = launchDocument;
   launchDocument = null;
-  return { file: document };
+  return { file: document, packaged: app.isPackaged, dev: !app.isPackaged || process.env.NODE_ENV === 'development' };
 });
 
 ipcMain.handle('file:read', async (_event, { filePath }) => readDocument(filePath));
@@ -1493,10 +1678,12 @@ ipcMain.handle('tree:context-menu', async (event, payload = {}) => {
       items.push(
         { type: 'separator' },
         { label: '重命名', click: () => finish('rename') },
-        { label: '删除', click: () => finish('delete') },
-        { type: 'separator' },
-        { label: '在资源管理器中显示', click: () => finish('reveal') }
+        { label: '删除', click: () => finish('delete') }
       );
+      if (kind === 'file') {
+        items.push({ label: payload.pinned ? '取消钉住' : '钉在顶部', click: () => finish(payload.pinned ? 'unpin' : 'pin') });
+      }
+      items.push({ type: 'separator' }, { label: '在资源管理器中显示', click: () => finish('reveal') });
     }
     if (kind === 'blank') {
       items.push({ type: 'separator' }, { label: '打开文件夹…', click: () => finish('open-folder') });
@@ -1515,6 +1702,31 @@ ipcMain.on('app:do-close', () => {
     mainWindow.__forceClose = true;
     mainWindow.close();
   }
+});
+
+ipcMain.on('app:try-close', () => {
+  mainWindow?.close();
+});
+
+ipcMain.on('app:reload', () => {
+  mainWindow?.reload();
+});
+
+ipcMain.on('app:zoom', (_event, dir) => {
+  const contents = mainWindow?.webContents;
+  if (!contents) return;
+  if (dir === 'in') contents.setZoomLevel(contents.getZoomLevel() + 0.5);
+  else if (dir === 'out') contents.setZoomLevel(contents.getZoomLevel() - 0.5);
+  else contents.setZoomLevel(0);
+});
+
+ipcMain.on('app:fullscreen', () => {
+  if (!mainWindow) return;
+  mainWindow.setFullScreen(!mainWindow.isFullScreen());
+});
+
+ipcMain.on('app:devtools', () => {
+  mainWindow?.webContents.toggleDevTools();
 });
 
 ipcMain.on('app:set-title', (_event, title) => mainWindow?.setTitle(title));
@@ -1555,8 +1767,8 @@ if (!gotLock) {
     registerWindowsIdentity();
     createWindow();
     buildMenu();
-    mainWindow.setMenuBarVisibility(true);
-    mainWindow.setAutoHideMenuBar(false);
+    mainWindow.setMenuBarVisibility(false);
+    mainWindow.setAutoHideMenuBar(true);
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
