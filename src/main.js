@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { pathToFileURL, fileURLToPath } = require('url');
+const { decodeDocumentBuffer } = require('./lib/encoding.cjs');
+const { DEFAULT_IGNORED, normalizePrefs } = require('./lib/prefs.cjs');
 
 const APP_ID = 'com.haiyu.markl';
 const ICON_GENERATION = 3;
@@ -88,6 +90,8 @@ let mainWindow = null;
 let launchDocument = null;
 let currentWorkspace = null;
 let currentAppearance = { theme: 'light', font: 'default', fontSize: 'medium' };
+let currentPrefs = normalizePrefs({});
+let ignoredDirectories = new Set(DEFAULT_IGNORED);
 
 const WINDOW_BG = {
   light: '#f4f5f7',
@@ -104,6 +108,32 @@ const FONT_SIZE_IDS = new Set(['small', 'medium', 'large', 'xlarge']);
 
 function appearancePath() {
   return path.join(app.getPath('userData'), 'appearance.json');
+}
+
+function prefsPath() {
+  return path.join(app.getPath('userData'), 'prefs.json');
+}
+
+function applyIgnoredDirectories(list) {
+  ignoredDirectories = new Set(list && list.length ? list : DEFAULT_IGNORED);
+}
+
+function writePrefs(value) {
+  currentPrefs = normalizePrefs(value);
+  applyIgnoredDirectories(currentPrefs.ignoredDirectories);
+  try {
+    fs.writeFileSync(prefsPath(), JSON.stringify(currentPrefs), 'utf8');
+  } catch (error) {
+    console.warn('保存偏好设置失败：', error.message);
+  }
+}
+
+function readPrefs() {
+  try {
+    return normalizePrefs(JSON.parse(fs.readFileSync(prefsPath(), 'utf8')));
+  } catch {
+    return normalizePrefs({});
+  }
 }
 
 function normalizeAppearance(value = {}) {
@@ -187,14 +217,48 @@ function schedulePersistWindowState() {
   windowStateTimer = setTimeout(persistWindowState, 200);
 }
 
+function resolvedTheme(appearance = currentAppearance, prefs = currentPrefs) {
+  if (prefs?.followSystemTheme) return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+  return appearance.theme;
+}
+
 function applyNativeAppearance(value, options = {}) {
   currentAppearance = normalizeAppearance(value);
-  nativeTheme.themeSource = DARK_THEMES.has(currentAppearance.theme) ? 'dark' : 'light';
+  const theme = resolvedTheme(currentAppearance, currentPrefs);
+  nativeTheme.themeSource = currentPrefs.followSystemTheme
+    ? 'system'
+    : (DARK_THEMES.has(theme) ? 'dark' : 'light');
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setBackgroundColor(WINDOW_BG[currentAppearance.theme] || WINDOW_BG.light);
+    mainWindow.setBackgroundColor(WINDOW_BG[theme] || WINDOW_BG.light);
   }
   if (options.persist) writeAppearance(currentAppearance);
   if (options.rebuildMenu) buildMenu();
+}
+
+function isPortableBuild() {
+  return Boolean(process.env.PORTABLE_EXECUTABLE_DIR);
+}
+
+function canAutoUpdate() {
+  return app.isPackaged && !isPortableBuild();
+}
+
+let autoUpdater = null;
+try {
+  ({ autoUpdater } = require('electron-updater'));
+} catch {
+  autoUpdater = null;
+}
+
+function setupAutoUpdater() {
+  if (!autoUpdater || !canAutoUpdate()) return;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('error', () => {});
+  autoUpdater.on('update-downloaded', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send('update:downloaded');
+  });
 }
 
 const DOCUMENT_RE = /\.(md|markdown|txt)$/i;
@@ -250,7 +314,11 @@ const MIME_IMAGE_EXT = {
   'image/x-icon': '.ico',
   'image/avif': '.avif'
 };
-const IGNORED_DIRECTORIES = new Set(['.git', '.svn', 'node_modules', 'dist', 'build', '.cache']);
+function isIgnoredDirectoryName(name) {
+  if (!name) return true;
+  if (name.startsWith('.')) return true;
+  return ignoredDirectories.has(name);
+}
 const MAX_TREE_DEPTH = 16;
 const MAX_TREE_ITEMS = 2500;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -331,7 +399,8 @@ function readDocument(filePath) {
   const resolved = path.resolve(filePath);
   if (!DOCUMENT_RE.test(resolved)) throw new Error('仅支持 Markdown 或文本文件。');
   authorizeWritePath(resolved);
-  return { filePath: resolved, content: fs.readFileSync(resolved, 'utf8') };
+  const decoded = decodeDocumentBuffer(fs.readFileSync(resolved));
+  return { filePath: resolved, content: decoded.content, encoding: decoded.encoding };
 }
 
 function focusMainWindow() {
@@ -501,15 +570,16 @@ async function inspectLatestRelease() {
 async function runUpdateCheck({ silent = false } = {}) {
   try {
     const info = await inspectLatestRelease();
-    if (!info.newer) return { status: 'latest', ...info };
+    if (!info.newer) return { status: 'latest', canAutoUpdate: canAutoUpdate(), ...info };
     if (silent && readDismissedVersion() === info.latest) {
-      return { status: 'dismissed', ...info };
+      return { status: 'dismissed', canAutoUpdate: canAutoUpdate(), ...info };
     }
-    return { status: 'available', ...info };
+    return { status: 'available', canAutoUpdate: canAutoUpdate(), ...info };
   } catch (error) {
     return {
       status: 'error',
       current: app.getVersion(),
+      canAutoUpdate: canAutoUpdate(),
       message: error?.message || String(error)
     };
   }
@@ -562,7 +632,7 @@ function buildDirectoryTree(rootPath) {
       const fullPath = path.join(directory, entry.name);
 
       if (entry.isDirectory()) {
-        if (IGNORED_DIRECTORIES.has(entry.name) || entry.name.startsWith('.')) continue;
+        if (isIgnoredDirectoryName(entry.name)) continue;
         const children = walk(fullPath, depth + 1);
         nodes.push({ type: 'directory', name: entry.name, path: fullPath, children });
         itemCount += 1;
@@ -622,7 +692,7 @@ function isOwnWrite(targetPath) {
 
 function shouldIgnoreWatchName(relativeName) {
   const parts = String(relativeName || '').split(/[\\/]/);
-  return parts.some((part) => !part || part.startsWith('.') || IGNORED_DIRECTORIES.has(part));
+  return parts.some((part) => !part || isIgnoredDirectoryName(part));
 }
 
 function flushFsNotify() {
@@ -710,7 +780,7 @@ function startFilePoll(filePath) {
       return;
     }
     lastPolledMtime = mtime;
-  }, 400);
+  }, 1500);
 }
 
 function startFileWatch(filePath) {
@@ -850,12 +920,12 @@ function buildMenu() {
     {
       label: '主题',
       submenu: [
-        { label: '浅色', type: 'radio', checked: currentAppearance.theme === 'light', click: () => mainWindow?.webContents.send('menu:theme', 'light') },
-        { label: '青雾', type: 'radio', checked: currentAppearance.theme === 'mist', click: () => mainWindow?.webContents.send('menu:theme', 'mist') },
-        { label: '护眼', type: 'radio', checked: currentAppearance.theme === 'sepia', click: () => mainWindow?.webContents.send('menu:theme', 'sepia') },
-        { label: '深色', type: 'radio', checked: currentAppearance.theme === 'dark', click: () => mainWindow?.webContents.send('menu:theme', 'dark') },
-        { label: '墨夜', type: 'radio', checked: currentAppearance.theme === 'ink', click: () => mainWindow?.webContents.send('menu:theme', 'ink') },
-        { label: '海暮', type: 'radio', checked: currentAppearance.theme === 'dusk', click: () => mainWindow?.webContents.send('menu:theme', 'dusk') }
+        { label: '浅色', type: 'radio', checked: resolvedTheme() === 'light', click: () => mainWindow?.webContents.send('menu:theme', 'light') },
+        { label: '青雾', type: 'radio', checked: resolvedTheme() === 'mist', click: () => mainWindow?.webContents.send('menu:theme', 'mist') },
+        { label: '护眼', type: 'radio', checked: resolvedTheme() === 'sepia', click: () => mainWindow?.webContents.send('menu:theme', 'sepia') },
+        { label: '深色', type: 'radio', checked: resolvedTheme() === 'dark', click: () => mainWindow?.webContents.send('menu:theme', 'dark') },
+        { label: '墨夜', type: 'radio', checked: resolvedTheme() === 'ink', click: () => mainWindow?.webContents.send('menu:theme', 'ink') },
+        { label: '海暮', type: 'radio', checked: resolvedTheme() === 'dusk', click: () => mainWindow?.webContents.send('menu:theme', 'dusk') }
       ]
     },
     {
@@ -928,6 +998,12 @@ function buildMenu() {
           checked: currentAppearance.fontSize === 'xlarge',
           click: () => mainWindow?.webContents.send('menu:font-size', 'xlarge')
         }
+      ]
+    },
+    {
+      label: '设置',
+      submenu: [
+        { label: '打开设置…', accelerator: 'CmdOrCtrl+,', click: send('menu:settings') }
       ]
     },
     {
@@ -1082,7 +1158,7 @@ ipcMain.handle('workspace:search', async (_event, { rootPath, query, caseSensiti
     if (!stat.isFile() || stat.size > maxBytes) return;
     let text;
     try {
-      text = fs.readFileSync(fullPath, 'utf8');
+      text = decodeDocumentBuffer(fs.readFileSync(fullPath)).content;
     } catch {
       return;
     }
@@ -1105,7 +1181,7 @@ ipcMain.handle('workspace:search', async (_event, { rootPath, query, caseSensiti
     }
   }
 
-  function walk(directory, depth) {
+  async function walk(directory, depth) {
     if (depth > MAX_TREE_DEPTH || scanned >= MAX_TREE_ITEMS) return;
     let entries;
     try {
@@ -1117,18 +1193,19 @@ ipcMain.handle('workspace:search', async (_event, { rootPath, query, caseSensiti
       if (scanned >= MAX_TREE_ITEMS || entry.isSymbolicLink()) break;
       const fullPath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
-        if (IGNORED_DIRECTORIES.has(entry.name) || entry.name.startsWith('.')) continue;
+        if (isIgnoredDirectoryName(entry.name)) continue;
         considerName('directory', entry.name, fullPath);
-        walk(fullPath, depth + 1);
+        await walk(fullPath, depth + 1);
       } else if (entry.isFile() && DOCUMENT_RE.test(entry.name)) {
         scanned += 1;
         considerName('file', entry.name, fullPath);
         searchFileContent(fullPath, entry.name);
+        if (scanned % 24 === 0) await new Promise((resolve) => setImmediate(resolve));
       }
     }
   }
 
-  walk(root, 0);
+  await walk(root, 0);
   return { names, contents };
 });
 
@@ -1456,8 +1533,54 @@ ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('app:launch-context', async () => {
   const document = launchDocument;
   launchDocument = null;
-  return { file: document, packaged: app.isPackaged, dev: !app.isPackaged || process.env.NODE_ENV === 'development' };
+  return {
+    file: document,
+    packaged: app.isPackaged,
+    portable: isPortableBuild(),
+    canAutoUpdate: canAutoUpdate(),
+    prefs: currentPrefs,
+    appearance: currentAppearance,
+    systemDark: nativeTheme.shouldUseDarkColors,
+    dev: !app.isPackaged || process.env.NODE_ENV === 'development'
+  };
 });
+
+ipcMain.handle('prefs:get', async () => currentPrefs);
+
+ipcMain.handle('prefs:set', async (_event, payload) => {
+  writePrefs(payload || {});
+  applyNativeAppearance(currentAppearance, { persist: true, rebuildMenu: true });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('prefs:changed', {
+      prefs: currentPrefs,
+      appearance: currentAppearance,
+      theme: resolvedTheme(),
+      systemDark: nativeTheme.shouldUseDarkColors
+    });
+  }
+  return currentPrefs;
+});
+
+let katexCssCache = '';
+
+function inlineKatexCss() {
+  if (katexCssCache) return katexCssCache;
+  const cssPath = path.join(__dirname, '..', 'node_modules', 'vditor', 'dist', 'js', 'katex', 'katex.min.css');
+  if (!fs.existsSync(cssPath)) return '';
+  let css = fs.readFileSync(cssPath, 'utf8');
+  const fontDir = path.join(path.dirname(cssPath), 'fonts');
+  css = css.replace(/url\((?:'|")?(fonts\/[^)"']+\.woff2)(?:'|")?\)/g, (full, rel) => {
+    const file = path.join(path.dirname(cssPath), rel.split('/').join(path.sep));
+    if (!fs.existsSync(file)) return full;
+    return `url(data:font/woff2;base64,${fs.readFileSync(file).toString('base64')})`;
+  });
+  css = css.replace(/,url\((?:'|")?fonts\/[^)"']+\.(?:woff|ttf)(?:'|")?\)[^,;} ]*/g, '');
+  void fontDir;
+  katexCssCache = css;
+  return katexCssCache;
+}
+
+ipcMain.handle('html:katex-css', async () => inlineKatexCss());
 
 ipcMain.handle('file:read', async (_event, { filePath }) => readDocument(filePath));
 
@@ -1734,11 +1857,26 @@ ipcMain.on('appearance:set', (_event, payload) => {
   applyNativeAppearance(payload, { persist: true, rebuildMenu: true });
 });
 
-ipcMain.handle('update:check', async () => checkForUpdate({ silent: false }));
+ipcMain.handle('update:check', async () => {
+  const result = await checkForUpdate({ silent: false });
+  return { ...result, canAutoUpdate: canAutoUpdate() };
+});
 
 ipcMain.handle('update:dismiss', async (_event, version) => {
   const value = String(version || '').replace(/^v/i, '').trim();
   if (value) writeDismissedVersion(value);
+  return true;
+});
+
+ipcMain.handle('update:download', async () => {
+  if (!canAutoUpdate() || !autoUpdater) throw new Error('当前版本不支持应用内安装。');
+  await autoUpdater.downloadUpdate();
+  return true;
+});
+
+ipcMain.handle('update:install', async () => {
+  if (!canAutoUpdate() || !autoUpdater) throw new Error('当前版本不支持应用内安装。');
+  autoUpdater.quitAndInstall();
   return true;
 });
 
@@ -1755,7 +1893,22 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    currentPrefs = readPrefs();
+    applyIgnoredDirectories(currentPrefs.ignoredDirectories);
     applyNativeAppearance(readAppearance());
+    setupAutoUpdater();
+    nativeTheme.on('updated', () => {
+      if (!currentPrefs.followSystemTheme) return;
+      applyNativeAppearance(currentAppearance, { persist: false, rebuildMenu: true });
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('prefs:changed', {
+          prefs: currentPrefs,
+          appearance: currentAppearance,
+          theme: resolvedTheme(),
+          systemDark: nativeTheme.shouldUseDarkColors
+        });
+      }
+    });
     const launchPath = extractFileArg(process.argv);
     if (launchPath) {
       try {

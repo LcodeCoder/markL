@@ -30,6 +30,11 @@ contextBridge.exposeInMainWorld('markl', {
   readRevision: (options) => ipcRenderer.invoke('revision:read', options),
   getLaunchContext: () => ipcRenderer.invoke('app:launch-context'),
   getVersion: () => ipcRenderer.invoke('app:version'),
+  getPrefs: () => ipcRenderer.invoke('prefs:get'),
+  setPrefs: (payload) => ipcRenderer.invoke('prefs:set', payload),
+  katexCss: () => ipcRenderer.invoke('html:katex-css'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
   inlineHtmlImages: (options) => ipcRenderer.invoke('html:inline-images', options),
   printDocument: () => ipcRenderer.invoke('app:print'),
   checkUpdate: () => ipcRenderer.invoke('update:check'),
@@ -76,8 +81,11 @@ contextBridge.exposeInMainWorld('markl', {
       'menu:workspace-search',
       'menu:check-update',
       'menu:quick-open',
+      'menu:settings',
       'menu:about',
       'update:available',
+      'update:downloaded',
+      'prefs:changed',
       'fs:change',
       'app:before-close'
     ];

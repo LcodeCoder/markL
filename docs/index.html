@@ -36,7 +36,7 @@
         <h1>像写纸稿一样写 Markdown</h1>
         <p class="lede">
           MarkL 面向中文作者：打开就是一篇正在排版的文档，不是左边源码、右边预览的两页纸。
-          文件树管目录，灰框代码带语言标签和高亮，写完可以导出独立 HTML。
+          文件树管目录，灰框代码带语言标签和高亮，写完可以导出独立 HTML 或 PDF。
         </p>
         <div class="actions">
           <a class="btn btn-primary" href="https://github.com/LcodeCoder/markL/releases/latest">下载 Windows 绿色版</a>
@@ -85,31 +85,31 @@
         </li>
         <li class="feature">
           <h3>5. 保存、另存为、未保存保护</h3>
-          <p>新建、打开、保存、另存为都有菜单和快捷键。切换文件或退出时，若有未保存修改会中文确认。文档按 UTF-8 读写。安装后可双击 <code>.md</code> / <code>.markdown</code> 用 MarkL 打开。</p>
+          <p>新建、打开、保存、另存为都有菜单和快捷键。文档打开时识别 UTF-8 / GBK，保存写成 UTF-8。已保存的文档默认自动保存，可在设置里关掉。换文件或退出时，若有未保存修改会中文确认。安装后可双击 <code>.md</code> / <code>.markdown</code> 用 MarkL 打开。</p>
         </li>
         <li class="feature">
           <h3>6. 查找与替换</h3>
-          <p><kbd>Ctrl</kbd>+<kbd>F</kbd> 打开查找条，<kbd>Ctrl</kbd>+<kbd>H</kbd> 展开替换。即时渲染和源码共用结果。输入即搜，<kbd>Enter</kbd> / <kbd>F3</kbd> 下一个，<kbd>Aa</kbd> 区分大小写。</p>
+          <p><kbd>Ctrl</kbd>+<kbd>F</kbd> 打开查找条，<kbd>Ctrl</kbd>+<kbd>H</kbd> 展开替换。即时渲染和源码共用结果。输入即搜，<kbd>Enter</kbd> / <kbd>F3</kbd> 下一个。<kbd>Aa</kbd> 区分大小写，<kbd>W</kbd> 全词，<kbd>.*</kbd> 正则。侧栏搜索可对整个文件夹全部替换。</p>
         </li>
         <li class="feature">
           <h3>7. 粘贴与拖入图片</h3>
-          <p>截图粘贴或把图片拖进正文，会存到当前文档旁的 <code>assets/</code>，并插入相对路径。尚未保存时会先请你保存文档。已有的相对路径图片按文档目录解析。</p>
+          <p>截图粘贴或把图片拖进正文，会存到当前文档旁的 <code>assets/</code>，并插入相对路径。尚未保存时会先请你保存文档。已有的相对路径图片按文档目录解析。插入已有图片时能看到缩略图。</p>
         </li>
         <li class="feature">
           <h3>8. 启动恢复</h3>
           <p>下次打开会回到上次的文件夹、文档和目录栏显隐。若从资源管理器双击某个 Markdown，则以该文件为准。</p>
         </li>
         <li class="feature">
-          <h3>9. 导出 HTML</h3>
-          <p>「文件 → 导出 HTML」生成带基础样式的独立网页：标题、段落、表格、灰底代码块都在。本地图片会内联进去，发给别人不用再带文件夹。颜色跟当前浅色 / 深色 / 护眼主题走。</p>
+          <h3>9. 导出 HTML / PDF</h3>
+          <p>「文件 → 导出 HTML」生成带基础样式的独立网页，本地图片和公式样式打进文件，不依赖 CDN。也可以导出 PDF。颜色跟当前主题走。</p>
         </li>
         <li class="feature">
-          <h3>10. 浅色 / 深色 / 护眼与字体</h3>
-          <p>菜单「主题」可切浅色、深色、护眼；「字体」可选微软雅黑、宋体、楷体等和四种字号。选择会记住。侧栏、正文、代码框、语言弹窗、状态栏一起变。</p>
+          <h3>10. 主题、字体与设置</h3>
+          <p>菜单「主题」可切浅色、青雾、护眼、深色、墨夜、海暮。顶栏「设置」在「帮助」旁边，点开是弹窗，开关控制自动保存、跟随系统主题、行号等。也可 <kbd>Ctrl</kbd>+<kbd>,</kbd>。</p>
         </li>
         <li class="feature">
           <h3>11. 状态栏与目录栏</h3>
-          <p>底部显示保存状态、即时渲染或源码、UTF-8、按可见正文统计的字数和字符数。<kbd>Ctrl</kbd>+<kbd>B</kbd> 收起目录栏；拖右边可改宽度。窄窗口里目录栏改成抽屉。窗口位置下次还会在。</p>
+          <p>底部显示保存状态、即时渲染或源码、编码、字数和选区字数。<kbd>Ctrl</kbd>+<kbd>B</kbd> 收起目录栏；拖右边可改宽度。窄窗口里目录栏改成抽屉。窗口位置下次还会在。</p>
         </li>
         <li class="feature">
           <h3>12. Windows 桌面身份</h3>
@@ -138,6 +138,7 @@
           <tr><td>C / C++ / C#</td><td>c, cpp, cs</td><td>系统与 .NET</td></tr>
           <tr><td>SQL / Go / Rust</td><td>sql, golang, rs</td><td>数据库与系统语言</td></tr>
           <tr><td>Markdown / 纯文本</td><td>md, txt</td><td>文档或不做高亮</td></tr>
+          <tr><td>Mermaid</td><td>mmd, diagram</td><td>流程图 / 时序图</td></tr>
         </tbody>
       </table>
     </section>
@@ -154,15 +155,18 @@
           <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>打开文件</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>打开文件夹</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>快速打开工作区文档</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd></td><td>最近打开的文档</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>打印</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>保存</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>另存为</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>查找</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td><td>替换</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>设置</td></tr>
           <tr><td><kbd>F3</kbd></td><td>下一个匹配</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>即时渲染 ⇄ 源码</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>显示或隐藏目录栏</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>L</kbd></td><td>格式化当前代码块</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd></td><td>整理中文排版</td></tr>
           <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Enter</kbd> <kbd>Esc</kbd></td><td>选择或关闭代码语言</td></tr>
         </tbody>
       </table>

@@ -16,6 +16,17 @@ import {
 } from './text-search.js';
 import { typesetChineseMarkdown } from './zh-typeset.js';
 import { DOC_TEMPLATES, templateById, fileNameForTemplate } from './templates.js';
+import { collapseUnchanged, diffLines } from '../lib/text-diff.js';
+import { countMarkdownStats, countProse } from '../lib/word-count.js';
+import {
+  baseName,
+  escapeHtml,
+  isPathInside,
+  parentFolderName,
+  pathSeparator,
+  relativeTime,
+  samePath
+} from './path-utils.js';
 
 const LANGUAGES = [
   { id: 'javascript', label: 'JavaScript', aliases: ['js', 'node'], description: '网页与 Node.js' },
@@ -97,6 +108,13 @@ const SIDEBAR_WIDTH_KEY = 'markl-sidebar-width';
 const SIDEBAR_MIN = 248;
 const SIDEBAR_MAX = 480;
 const SIDEBAR_DEFAULT = 280;
+const PREFS_KEY = 'markl-prefs';
+const MEASURE_CSS = {
+  narrow: '860px',
+  standard: '1120px',
+  wide: '1440px',
+  full: 'none'
+};
 
 const state = {
   filePath: null,
@@ -115,7 +133,17 @@ const state = {
   restoringSession: false,
   appearance: { theme: 'light', font: 'default', fontSize: 'medium' },
   diskMtime: 0,
-  fileMissing: false
+  fileMissing: false,
+  encoding: 'UTF-8',
+  prefs: {
+    autoSave: true,
+    followSystemTheme: false,
+    defaultSourceMode: false,
+    lineNumbers: false,
+    measure: 'standard',
+    ignoredDirectories: ['.git', '.svn', 'node_modules', 'dist', 'build', '.cache']
+  },
+  canAutoUpdate: false
 };
 
 const elements = {
@@ -220,7 +248,24 @@ const elements = {
   updateActions: document.getElementById('update-actions'),
   updateClose: document.getElementById('update-close'),
   checkUpdateButton: document.getElementById('check-update-button'),
-  formatMenu: document.getElementById('format-menu')
+  formatMenu: document.getElementById('format-menu'),
+  sourceWrap: document.getElementById('source-wrap'),
+  sourceGutter: document.getElementById('source-gutter'),
+  encodingLabel: document.getElementById('encoding-label'),
+  settingsPanel: document.getElementById('settings-panel'),
+  settingsBackdrop: document.getElementById('settings-backdrop'),
+  settingsDone: document.getElementById('settings-done'),
+  prefAutosave: document.getElementById('pref-autosave'),
+  prefSystemTheme: document.getElementById('pref-system-theme'),
+  prefSourceMode: document.getElementById('pref-source-mode'),
+  prefLineNumbers: document.getElementById('pref-line-numbers'),
+  prefMeasure: document.getElementById('pref-measure'),
+  prefIgnored: document.getElementById('pref-ignored'),
+  revisionDiff: document.getElementById('revision-diff'),
+  revisionActions: document.getElementById('revision-actions'),
+  revisionRestore: document.getElementById('revision-restore'),
+  revisionCancel: document.getElementById('revision-cancel'),
+  updateInstall: document.getElementById('update-install')
 };
 
 function normalizeMarkdown(content = '') {
@@ -386,35 +431,6 @@ function focusEditor() {
   ir?.focus();
 }
 
-function baseName(filePath) {
-  if (!filePath) return '未命名.md';
-  return filePath.split(/[\\/]/).pop();
-}
-
-function directoryName(filePath) {
-  if (!filePath) return '新文档';
-  const parts = filePath.split(/[\\/]/);
-  parts.pop();
-  return parts.join(' / ') || '本地文件';
-}
-
-function isPathInside(filePath, rootPath) {
-  if (!filePath || !rootPath) return false;
-  const normalizedFile = filePath.replace(/\\/g, '/').toLowerCase();
-  const normalizedRoot = rootPath.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
-  return normalizedFile === normalizedRoot || normalizedFile.startsWith(`${normalizedRoot}/`);
-}
-
-function samePath(left, right) {
-  return String(left || '').replace(/\\/g, '/').toLowerCase() === String(right || '').replace(/\\/g, '/').toLowerCase();
-}
-
-function parentFolderName(filePath) {
-  const parts = String(filePath || '').split(/[\\/]/).filter(Boolean);
-  parts.pop();
-  return parts.pop() || '';
-}
-
 function parentDisplay(filePath) {
   return parentFolderName(filePath);
 }
@@ -463,25 +479,6 @@ function rewriteHistoryPath(oldPath, nextPath) {
     return { ...item, path: nextPath, name: baseName(nextPath) };
   }));
   renderHistory();
-}
-
-function relativeTime(ts) {
-  if (!ts) return '';
-  const diff = Date.now() - ts;
-  const sec = Math.floor(diff / 1000);
-  if (sec < 60) return '刚刚';
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min} 分钟前`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr} 小时前`;
-  const day = Math.floor(hr / 24);
-  if (day === 1) return '昨天';
-  if (day < 7) return `${day} 天前`;
-  const wk = Math.floor(day / 7);
-  if (wk < 5) return `${wk} 周前`;
-  const mo = Math.floor(day / 30);
-  if (mo < 12) return `${mo} 个月前`;
-  return `${Math.floor(mo / 12)} 年前`;
 }
 
 function renderHistory() {
@@ -563,13 +560,17 @@ async function openHistoryItem(item) {
       }
       return;
     }
-    if (item.path === state.filePath) return;
+    if (samePath(item.path, state.filePath)) return;
     if (!(await confirmDiscardIfDirty())) return;
     const result = await window.markl.readFile({ filePath: stat.path || item.path });
-    loadContent(result.filePath, result.content);
+    loadContent(result.filePath, result.content, { encoding: result.encoding });
   } catch (error) {
     showOperationError(item.kind === 'folder' ? '打开文件夹' : '打开文件', error);
   }
+}
+
+function updateEncodingLabel() {
+  if (elements.encodingLabel) elements.encodingLabel.textContent = state.encoding || 'UTF-8';
 }
 
 function updateTitle() {
@@ -581,22 +582,27 @@ function updateTitle() {
   elements.dirtyDot.classList.toggle('hidden', !state.dirty);
   elements.saveStatus.textContent = state.dirty ? '尚未保存' : '已保存';
   elements.saveStatus.classList.toggle('is-dirty', state.dirty);
+  updateEncodingLabel();
   window.markl.setTitle(`${state.dirty ? '● ' : ''}${name} — MarkL`);
   updateActiveTreeItem();
 }
 
+function selectionProse() {
+  const raw = currentSelectionText().replace(/\r\n/g, '\n').trim();
+  if (!raw) return '';
+  return visibleProseFromMarkdown(raw);
+}
+
 function updateCounts() {
   const markdown = getMarkdown() || '';
-  const raw = markdown.replace(/\n+$/, '');
   const text = visibleProseFromMarkdown(markdown);
-  const characters = Array.from(text).length;
-  const cjk = (text.match(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g) || []).length;
-  const latinWords = (text
-    .replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g, ' ')
-    .match(/[A-Za-z0-9]+(?:['_-][A-Za-z0-9]+)*/g) || []).length;
-  const lines = raw ? raw.split('\n').length : 0;
-  const paragraphs = raw ? raw.split(/\n\s*\n/).filter((b) => b.trim().length > 0).length : 0;
-  elements.counts.textContent = (cjk + latinWords) + ' 字 · ' + characters + ' 字符 · ' + lines + ' 行 · ' + paragraphs + ' 段';
+  const prose = countProse(text);
+  const stats = countMarkdownStats(markdown, selectionProse());
+  let label = `${prose.words} 字 · ${prose.characters} 字符 · ${stats.lines} 行 · ${stats.paragraphs} 段`;
+  if (stats.selection) {
+    label += ` · 选区 ${stats.selection.words} 字`;
+  }
+  elements.counts.textContent = label;
 }
 
 function markClean(content) {
@@ -619,9 +625,28 @@ function recomputeDirty() {
   syncTemplateBar();
 }
 
-function loadContent(filePath, content) {
+let selectedRevision = null;
+
+function applyEditorMode(wantSource) {
+  const next = Boolean(wantSource);
+  if (next === state.sourceMode) {
+    syncSourceChrome();
+    return;
+  }
+  state.sourceMode = next;
+  document.getElementById('editor')?.classList.toggle('hidden', next);
+  elements.sourceWrap?.classList.toggle('hidden', !next);
+  elements.sourceEditor.classList.toggle('hidden', !next);
+  if (next) hideTableToolbar();
+  syncModeButton();
+  syncSourceChrome();
+}
+
+function loadContent(filePath, content, options = {}) {
+  const encoding = options.encoding || 'UTF-8';
   if (state.filePath && state.filePath !== filePath) rememberCaret(state.filePath);
   state.filePath = filePath;
+  state.encoding = encoding;
   const normalized = normalizeMarkdown(content);
   setMarkdown(normalized, true);
   markClean(normalized);
@@ -720,6 +745,8 @@ async function doNew() {
   if (!(await confirmDiscardIfDirty())) return;
   if (state.filePath) rememberCaret(state.filePath);
   state.filePath = null;
+  state.encoding = 'UTF-8';
+  applyEditorMode(Boolean(state.prefs.defaultSourceMode));
   setMarkdown('', true);
   markClean('');
   updateCounts();
@@ -737,7 +764,7 @@ async function doOpen() {
   if (!(await confirmDiscardIfDirty())) return;
   try {
     const result = await window.markl.openDialog();
-    if (result) loadContent(result.filePath, result.content);
+    if (result) loadContent(result.filePath, result.content, { encoding: result.encoding });
   } catch (error) {
     showOperationError('打开文件', error);
   } finally {
@@ -746,11 +773,11 @@ async function doOpen() {
 }
 
 async function openTreeFile(filePath) {
-  if (filePath === state.filePath) return;
+  if (samePath(filePath, state.filePath)) return;
   if (!(await confirmDiscardIfDirty())) return;
   try {
     const result = await window.markl.readFile({ filePath });
-    loadContent(result.filePath, result.content);
+    loadContent(result.filePath, result.content, { encoding: result.encoding });
   } catch (error) {
     showOperationError('读取文件', error);
   }
@@ -790,6 +817,7 @@ async function doSaveAs() {
     if (state.filePath && content !== state.savedContent) await snapshotCurrentRevision();
     await window.markl.writeFile({ filePath: target, content });
     state.filePath = target;
+    state.encoding = 'UTF-8';
     markClean(content);
     rememberOpen('file', target);
     if (isPathInside(target, state.workspaceRoot)) await refreshWorkspace();
@@ -804,12 +832,6 @@ async function doSaveAs() {
     showOperationError('另存为', error);
     return false;
   }
-}
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[character]));
 }
 
 async function doExportHtml() {
@@ -843,10 +865,6 @@ function parentDirectory(filePath) {
   const parts = filePath.split(/[\\/]/);
   parts.pop();
   return parts.join(pathSeparator(filePath));
-}
-
-function pathSeparator(filePath) {
-  return String(filePath || '').includes('\\') ? '\\' : '/';
 }
 
 function svgNode(markup) {
@@ -970,7 +988,18 @@ function createTreeNode(node, depth = 0) {
     extEl.textContent = ext;
     name.append(stemEl, extEl);
     row.addEventListener('click', () => openTreeFile(node.path));
-    row.append(chevron, fileIcon(), name);
+    const pin = document.createElement('button');
+    pin.type = 'button';
+    pin.className = 'tree-pin';
+    pin.title = isPinned(node.path) ? '取消钉住' : '钉在顶部';
+    pin.setAttribute('aria-label', pin.title);
+    pin.innerHTML = '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round" d="M5.2 2.7h5.6l-.7 3.4 1.5 1.5v.9H4.4v-.9l1.5-1.5Z"/><path fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" d="M8 8.5V13.3"/></svg>';
+    pin.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      togglePin(node.path);
+    });
+    row.append(chevron, fileIcon(), name, pin);
   }
 
   item.appendChild(row);
@@ -1011,8 +1040,10 @@ function renderFileTree() {
 
 function updateActiveTreeItem() {
   document.querySelectorAll('.tree-row').forEach((row) => {
-    const active = row.dataset.path === state.filePath;
+    const path = row.dataset.path;
+    const active = samePath(path, state.filePath);
     row.classList.toggle('is-active', active);
+    row.classList.toggle('is-pinned', Boolean(path) && isPinned(path));
     row.classList.toggle('is-dirty', active && state.dirty);
   });
   document.querySelectorAll('.history-row').forEach((row) => {
@@ -1940,21 +1971,14 @@ function handleFormatAction(action) {
 function toggleMode() {
   if (state.sourceMode) {
     const value = elements.sourceEditor.value || '';
-    state.sourceMode = false;
-    elements.sourceEditor.classList.add('hidden');
-    document.getElementById('editor').classList.remove('hidden');
+    applyEditorMode(false);
     if (vditor) vditor.setValue(value, true);
-    syncModeButton();
     focusEditor();
   } else {
     const value = getMarkdown();
-    state.sourceMode = true;
+    applyEditorMode(true);
     elements.sourceEditor.value = value;
-    document.getElementById('editor').classList.add('hidden');
-    elements.sourceEditor.classList.remove('hidden');
-    syncModeButton();
     elements.sourceEditor.focus();
-    hideTableToolbar();
   }
   recomputeDirty();
   scheduleImageResolve();
@@ -2079,6 +2103,7 @@ async function handleTreeAction(action, kind, targetPath) {
       await window.markl.deletePath({ targetPath });
       if (state.filePath && isPathInside(state.filePath, targetPath)) {
         state.filePath = null;
+        state.encoding = 'UTF-8';
         setMarkdown('', true);
         markClean('');
         updateCounts();
@@ -2148,6 +2173,9 @@ function applyVditorTheme(theme) {
 
 function applyAppearance(appearance) {
   const next = normalizeAppearance(appearance);
+  if (state.prefs.followSystemTheme) {
+    next.theme = state.systemDark ? 'dark' : 'light';
+  }
   state.appearance = next;
   document.body.classList.remove('theme-light', 'theme-mist', 'theme-sepia', 'theme-dark', 'theme-ink', 'theme-dusk');
   document.body.classList.add(`theme-${next.theme}`);
@@ -2169,8 +2197,97 @@ function persistAppearance() {
 }
 
 function setAppearance(patch) {
+  if (patch.theme && state.prefs.followSystemTheme) {
+    applyPrefs({ ...state.prefs, followSystemTheme: false });
+  }
   applyAppearance({ ...state.appearance, ...patch });
   persistAppearance();
+}
+
+function normalizePrefs(value = {}) {
+  const ignored = Array.isArray(value.ignoredDirectories)
+    ? value.ignoredDirectories
+    : String(value.ignoredDirectories || '').split(/[,，\n]/);
+  const unique = [];
+  ignored.forEach((item) => {
+    const name = String(item || '').trim();
+    if (!name || name.includes('/') || name.includes('\\')) return;
+    if (!unique.includes(name)) unique.push(name);
+  });
+  return {
+    autoSave: value.autoSave !== false,
+    followSystemTheme: Boolean(value.followSystemTheme),
+    defaultSourceMode: Boolean(value.defaultSourceMode),
+    lineNumbers: Boolean(value.lineNumbers),
+    measure: ['narrow', 'standard', 'wide', 'full'].includes(value.measure) ? value.measure : 'standard',
+    ignoredDirectories: unique.length ? unique : state.prefs.ignoredDirectories
+  };
+}
+
+function applyPrefs(value, options = {}) {
+  const previousIgnore = (state.prefs.ignoredDirectories || []).join('|');
+  state.prefs = normalizePrefs({ ...state.prefs, ...value });
+  document.body.classList.toggle('line-numbers', state.prefs.lineNumbers);
+  const measure = MEASURE_CSS[state.prefs.measure] || MEASURE_CSS.standard;
+  document.documentElement.style.setProperty('--measure', measure === 'none' ? '100%' : measure);
+  if (elements.prefAutosave) elements.prefAutosave.checked = state.prefs.autoSave;
+  if (elements.prefSystemTheme) elements.prefSystemTheme.checked = state.prefs.followSystemTheme;
+  if (elements.prefSourceMode) elements.prefSourceMode.checked = state.prefs.defaultSourceMode;
+  if (elements.prefLineNumbers) elements.prefLineNumbers.checked = state.prefs.lineNumbers;
+  elements.prefMeasure?.querySelectorAll('[data-measure]').forEach((button) => {
+    const on = button.dataset.measure === state.prefs.measure;
+    button.classList.toggle('is-active', on);
+    button.setAttribute('aria-checked', String(on));
+  });
+  if (elements.prefIgnored) elements.prefIgnored.value = state.prefs.ignoredDirectories.join(', ');
+  syncSourceChrome();
+  if (options.persist !== false) {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(state.prefs));
+    window.markl.setPrefs?.(state.prefs);
+    if (state.workspaceRoot && previousIgnore !== state.prefs.ignoredDirectories.join('|')) {
+      refreshWorkspace().catch(() => {});
+    }
+  }
+  applyAppearance(state.appearance);
+}
+
+function persistPrefsFromForm() {
+  applyPrefs({
+    autoSave: Boolean(elements.prefAutosave?.checked),
+    followSystemTheme: Boolean(elements.prefSystemTheme?.checked),
+    defaultSourceMode: Boolean(elements.prefSourceMode?.checked),
+    lineNumbers: Boolean(elements.prefLineNumbers?.checked),
+    measure: elements.prefMeasure?.querySelector('.is-active')?.dataset.measure || 'standard',
+    ignoredDirectories: elements.prefIgnored?.value || ''
+  });
+}
+
+function isSettingsOpen() {
+  return Boolean(elements.settingsPanel && !elements.settingsPanel.classList.contains('hidden') && !elements.settingsPanel.classList.contains('is-leaving'));
+}
+
+function openSettingsPanel() {
+  closeAppMenu();
+  applyPrefs(state.prefs, { persist: false });
+  revealLayer(elements.settingsPanel);
+  elements.settingsDone?.focus();
+}
+
+function closeSettingsPanel() {
+  persistPrefsFromForm();
+  concealLayer(elements.settingsPanel);
+  restoreEditorFocus();
+}
+
+function syncSourceChrome() {
+  if (!elements.sourceGutter || !elements.sourceEditor) return;
+  if (!state.sourceMode || !state.prefs.lineNumbers) {
+    elements.sourceGutter.textContent = '';
+    return;
+  }
+  const lines = (elements.sourceEditor.value || '').split('\n').length;
+  elements.sourceGutter.textContent = Array.from({ length: Math.max(1, lines) }, (_, index) => index + 1).join('\n');
+  elements.sourceGutter.scrollTop = elements.sourceEditor.scrollTop;
 }
 
 function setTheme(theme) {
@@ -3430,7 +3547,7 @@ let autoSaveTimer = 0;
 let lastRevisionAt = 0;
 
 function scheduleAutoSave() {
-  if (state.restoringSession || !state.filePath) return;
+  if (state.restoringSession || !state.filePath || !state.prefs.autoSave) return;
   window.clearTimeout(autoSaveTimer);
   autoSaveTimer = window.setTimeout(runAutoSave, 1600);
 }
@@ -3544,9 +3661,47 @@ function markdownImageNames(markdown) {
   return names;
 }
 
+function resetRevisionDiff() {
+  selectedRevision = null;
+  if (elements.revisionDiff) {
+    elements.revisionDiff.innerHTML = '<p class="revision-diff-empty">选择一个版本，对照当前文档。</p>';
+  }
+  elements.revisionActions?.classList.add('hidden');
+}
+
+async function showRevisionDiff(item) {
+  if (!state.filePath) return;
+  try {
+    const content = await window.markl.readRevision({ filePath: state.filePath, id: item.id });
+    selectedRevision = { id: item.id, content };
+    const lines = collapseUnchanged(diffLines(getMarkdown(), content), 2);
+    elements.revisionDiff.replaceChildren();
+    lines.slice(0, 800).forEach((line) => {
+      const row = document.createElement('div');
+      row.className = `diff-line is-${line.type}`;
+      const mark = line.type === 'add' ? '+' : line.type === 'del' ? '-' : line.type === 'skip' ? '' : ' ';
+      row.textContent = `${mark}${line.text}`;
+      elements.revisionDiff.appendChild(row);
+    });
+    elements.revisionActions?.classList.remove('hidden');
+  } catch (error) {
+    showOperationError('对照历史', error);
+  }
+}
+
+async function restoreSelectedRevision() {
+  if (!selectedRevision) return;
+  setMarkdown(selectedRevision.content, true);
+  recomputeDirty();
+  concealLayer(elements.revisionPanel);
+  resetRevisionDiff();
+  focusEditor();
+}
+
 async function openRevisionPanel() {
   closeAppMenu();
   concealLayer(elements.assetPanel);
+  resetRevisionDiff();
   if (!state.filePath) {
     showAppDialog({ title: '本地历史', message: '先保存这篇文档，之后每次保存都会留下最近 10 个版本。', ok: '知道了' });
     return;
@@ -3565,18 +3720,7 @@ async function openRevisionPanel() {
       button.className = 'revision-item';
       const time = new Date(item.at).toLocaleString('zh-CN', { hour12: false });
       button.innerHTML = `<strong>${time}</strong><span>${escapeHtml(item.preview || '（空）')}</span>`;
-      button.addEventListener('click', async () => {
-        if (!(await confirmDiscardIfDirty())) return;
-        try {
-          const content = await window.markl.readRevision({ filePath: state.filePath, id: item.id });
-          setMarkdown(content, true);
-          recomputeDirty();
-          concealLayer(elements.revisionPanel);
-          focusEditor();
-        } catch (error) {
-          showOperationError('恢复历史', error);
-        }
-      });
+      button.addEventListener('click', () => showRevisionDiff(item));
       elements.revisionList.appendChild(button);
     });
   }
@@ -3600,7 +3744,14 @@ async function openAssetPanel() {
       button.type = 'button';
       button.className = 'asset-item';
       const kb = Math.max(1, Math.round(item.bytes / 1024));
-      button.innerHTML = `<strong>${escapeHtml(item.name)}</strong><span>${kb} KB · ${escapeHtml(item.relative)}</span>`;
+      const thumb = document.createElement('img');
+      thumb.className = 'asset-thumb';
+      thumb.alt = '';
+      thumb.src = item.fileUrl;
+      const copy = document.createElement('span');
+      copy.className = 'asset-copy';
+      copy.innerHTML = `<strong>${escapeHtml(item.name)}</strong><span>${kb} KB · ${escapeHtml(item.relative)}</span>`;
+      button.append(thumb, copy);
       button.addEventListener('click', () => {
         rememberImageAlias(item.fileUrl, item.relative);
         insertMarkdownSnippet(toMarkdownImage(imageAltFromName(item.name), item.relative));
@@ -3771,7 +3922,9 @@ async function buildStandaloneHtml(title) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+<style>
+${(await window.markl.katexCss?.().catch(() => '')) || ''}
+</style>
 <style>
 body{max-width:760px;margin:48px auto;padding:0 24px 80px;font-family:${contentFont};line-height:1.8;color:${theme.text};background:${theme.bg};overflow-wrap:anywhere}
 pre{background:${theme.code};padding:16px 20px;border-radius:8px;overflow:auto}code{font-family:"Cascadia Code",Consolas,monospace;font-size:13.5px}pre code{background:none;padding:0}
@@ -4026,7 +4179,7 @@ function flashDiskSync() {
   }, 1600);
 }
 
-function applyExternalReload(filePath, content) {
+function applyExternalReload(filePath, content, encoding) {
   const wrap = elements.editorWrap;
   const top = wrap?.scrollTop || 0;
   const sourceTop = elements.sourceEditor?.scrollTop || 0;
@@ -4036,6 +4189,7 @@ function applyExternalReload(filePath, content) {
     || document.activeElement === elements.sourceEditor
   );
   state.filePath = filePath;
+  if (encoding) state.encoding = encoding;
   const normalized = normalizeMarkdown(content);
   setMarkdown(normalized, true);
   markClean(normalized);
@@ -4067,7 +4221,7 @@ async function handleExternalFileChange() {
     if (state.diskMtime && stat.mtimeMs && stat.mtimeMs <= state.diskMtime + 20) return;
     if (!state.dirty) {
       const result = await window.markl.readFile({ filePath: state.filePath });
-      applyExternalReload(result.filePath, result.content);
+      applyExternalReload(result.filePath, result.content, result.encoding);
       return;
     }
     fileChangePromptOpen = true;
@@ -4080,7 +4234,7 @@ async function handleExternalFileChange() {
     fileChangePromptOpen = false;
     if (ok) {
       const result = await window.markl.readFile({ filePath: state.filePath });
-      applyExternalReload(result.filePath, result.content);
+      applyExternalReload(result.filePath, result.content, result.encoding);
     } else {
       state.diskMtime = stat.mtimeMs || Date.now();
     }
@@ -4614,7 +4768,7 @@ async function openDroppedDocument(file) {
   if (!(await confirmDiscardIfDirty())) return true;
   try {
     const result = await window.markl.readFile({ filePath });
-    loadContent(result.filePath, result.content);
+    loadContent(result.filePath, result.content, { encoding: result.encoding });
   } catch (error) {
     showOperationError('打开文件', error);
   }
@@ -4744,11 +4898,15 @@ async function restoreOnStartup() {
   try {
     launch = await launchContextPromise;
     appMenuDev = Boolean(launch?.dev);
+    state.canAutoUpdate = Boolean(launch?.canAutoUpdate);
+    state.systemDark = Boolean(launch?.systemDark);
+    if (launch?.prefs) applyPrefs(launch.prefs, { persist: false });
+    if (launch?.appearance) applyAppearance(launch.appearance);
     if (!launchHandled) {
       const session = readSession();
       if (launch?.file) {
         launchHandled = true;
-        loadContent(launch.file.filePath, launch.file.content);
+        loadContent(launch.file.filePath, launch.file.content, { encoding: launch.file.encoding });
         await restoreWorkspaceFromSession(session, { preferFile: launch.file.filePath });
       } else {
         await restoreWorkspaceFromSession(session);
@@ -4756,7 +4914,7 @@ async function restoreOnStartup() {
           const stat = await window.markl.statPath(session.filePath);
           if (stat.exists && stat.kind === 'file') {
             const result = await window.markl.readFile({ filePath: stat.path || session.filePath });
-            loadContent(result.filePath, result.content);
+            loadContent(result.filePath, result.content, { encoding: result.encoding });
           }
         }
       }
@@ -4818,7 +4976,7 @@ function createVditor() {
       },
       hljs: {
         enable: true,
-        lineNumber: false,
+        lineNumber: Boolean(state.prefs.lineNumbers),
         defaultLang: '',
         style: 'github'
       },
@@ -4994,13 +5152,18 @@ function renderUpdatePanel() {
   if (status === 'available') {
     elements.updateDownload.textContent = data.portable?.url ? '下载绿色版' : '打开发布页';
   }
+  if (status === 'downloaded' && elements.updateInstall) {
+    elements.updateInstall.textContent = '立即安装';
+  }
 
+  const canInstall = Boolean(data.canAutoUpdate || state.canAutoUpdate);
+  setUpdateShown(elements.updateInstall, (status === 'available' && canInstall) || status === 'downloaded');
   setUpdateShown(elements.updateDownload, status === 'available');
-  setUpdateShown(elements.updateSetup, status === 'available' && Boolean(data.setup?.url));
+  setUpdateShown(elements.updateSetup, status === 'available' && Boolean(data.setup?.url) && !canInstall);
   setUpdateShown(elements.updateRetry, status === 'error');
-  setUpdateShown(elements.updateLater, status === 'available');
+  setUpdateShown(elements.updateLater, status === 'available' || status === 'downloaded');
   setUpdateShown(elements.updateOk, status === 'latest');
-  setUpdateShown(elements.updateRelease, status === 'available' && Boolean(data.url));
+  setUpdateShown(elements.updateRelease, (status === 'available' || status === 'downloaded') && Boolean(data.url));
   setUpdateShown(elements.updateActions, status !== 'checking');
 
   const describedBy = status === 'error'
@@ -5067,6 +5230,50 @@ async function runManualUpdateCheck() {
 elements.checkUpdateButton.addEventListener('click', () => {
   runManualUpdateCheck();
 });
+elements.updateInstall?.addEventListener('click', async () => {
+  try {
+    if (updateUi.status === 'downloaded') {
+      await window.markl.installUpdate();
+      return;
+    }
+    elements.updateInstall.textContent = '正在下载…';
+    await window.markl.downloadUpdate();
+    showUpdatePanel({ ...(updateUi.payload || {}), status: 'downloaded', canAutoUpdate: true }, { focus: true });
+  } catch (error) {
+    showUpdatePanel({ status: 'error', current: updateUi.payload?.current, message: error?.message || String(error) }, { focus: true });
+  }
+});
+elements.settingsDone?.addEventListener('click', closeSettingsPanel);
+elements.settingsBackdrop?.addEventListener('click', closeSettingsPanel);
+elements.prefAutosave?.addEventListener('change', persistPrefsFromForm);
+elements.prefSystemTheme?.addEventListener('change', persistPrefsFromForm);
+elements.prefSourceMode?.addEventListener('change', persistPrefsFromForm);
+elements.prefLineNumbers?.addEventListener('change', persistPrefsFromForm);
+elements.prefMeasure?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-measure]');
+  if (!button || button.classList.contains('is-active')) return;
+  applyPrefs({
+    autoSave: Boolean(elements.prefAutosave?.checked),
+    followSystemTheme: Boolean(elements.prefSystemTheme?.checked),
+    defaultSourceMode: Boolean(elements.prefSourceMode?.checked),
+    lineNumbers: Boolean(elements.prefLineNumbers?.checked),
+    measure: button.dataset.measure,
+    ignoredDirectories: elements.prefIgnored?.value || ''
+  });
+});
+elements.prefMeasure?.addEventListener('keydown', (event) => {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  const buttons = [...(elements.prefMeasure.querySelectorAll('[data-measure]') || [])];
+  const index = buttons.findIndex((button) => button.classList.contains('is-active'));
+  const next = buttons[index + (event.key === 'ArrowRight' ? 1 : -1)];
+  if (!next) return;
+  event.preventDefault();
+  next.click();
+  next.focus();
+});
+elements.prefIgnored?.addEventListener('change', persistPrefsFromForm);
+elements.revisionRestore?.addEventListener('click', restoreSelectedRevision);
+elements.revisionCancel?.addEventListener('click', resetRevisionDiff);
 elements.updateClose.addEventListener('click', () => {
   closeUpdatePanel({ dismiss: updateUi.status === 'available' });
 });
@@ -5096,9 +5303,11 @@ elements.modeLabel.addEventListener('click', toggleMode);
 elements.sourceEditor.addEventListener('input', () => {
   recomputeDirty();
   scheduleFindRefresh();
+  syncSourceChrome();
 });
 elements.sourceEditor.addEventListener('scroll', () => {
   scheduleOutlineActive();
+  if (elements.sourceGutter) elements.sourceGutter.scrollTop = elements.sourceEditor.scrollTop;
 });
 
 elements.findInput.addEventListener('input', (event) => {
@@ -5162,7 +5371,10 @@ elements.findClose.addEventListener('click', closeFindBar);
 elements.workspaceReplaceAll?.addEventListener('click', () => {
   replaceInWorkspace().catch((error) => showOperationError('文件夹替换', error));
 });
-elements.revisionClose?.addEventListener('click', () => concealLayer(elements.revisionPanel));
+elements.revisionClose?.addEventListener('click', () => {
+  resetRevisionDiff();
+  concealLayer(elements.revisionPanel);
+});
 elements.assetClose?.addEventListener('click', () => concealLayer(elements.assetPanel));
 elements.quickOpenInput.addEventListener('input', () => {
   quickOpen.selected = 0;
@@ -5302,7 +5514,7 @@ async function showAboutDialog() {
   });
 }
 
-const APP_MENU_ORDER = ['file', 'edit', 'view', 'theme', 'font', 'help'];
+const APP_MENU_ORDER = ['file', 'edit', 'view', 'theme', 'font', 'settings', 'help'];
 let appMenuOpen = '';
 let appMenuIndex = 0;
 let appMenuDev = false;
@@ -5417,6 +5629,7 @@ function runAppMenuAction(action, value) {
     'export-pdf': doExportPdf,
     'new-template': openTemplateMenu,
     revisions: openRevisionPanel,
+    settings: openSettingsPanel,
     typeset: typesetCurrentDocument,
     'insert-asset': openAssetPanel,
     'clean-images': cleanUnusedImages,
@@ -5539,6 +5752,11 @@ function closeAppMenu() {
 }
 
 function openAppMenu(id) {
+  if (id === 'settings') {
+    closeAppMenu();
+    openSettingsPanel();
+    return;
+  }
   if (!elements.appMenuDropdown) return;
   appMenuOpen = id;
   appMenuIndex = 0;
@@ -5634,9 +5852,9 @@ elements.appMenubar?.addEventListener('mousemove', (event) => {
   if (tab?.dataset.menu && tab.dataset.menu !== appMenuOpen) openAppMenu(tab.dataset.menu);
 });
 
-window.markl.on('file:opened', async ({ filePath, content }) => {
+window.markl.on('file:opened', async ({ filePath, content, encoding }) => {
   launchHandled = true;
-  if (await confirmDiscardIfDirty()) loadContent(filePath, content);
+  if (await confirmDiscardIfDirty()) loadContent(filePath, content, { encoding });
 });
 window.markl.on('menu:new', doNew);
 window.markl.on('menu:open', doOpen);
@@ -5667,6 +5885,19 @@ window.markl.on('menu:check-update', () => runManualUpdateCheck());
 window.markl.on('menu:quick-open', () => openQuickOpen());
 window.markl.on('menu:about', () => {
   showAboutDialog();
+});
+window.markl.on('menu:settings', () => openSettingsPanel());
+window.markl.on('prefs:changed', (payload) => {
+  if (typeof payload?.systemDark === 'boolean') state.systemDark = payload.systemDark;
+  if (payload?.prefs) applyPrefs(payload.prefs, { persist: false });
+  if (payload?.appearance) applyAppearance(payload.appearance);
+});
+window.markl.on('update:downloaded', () => {
+  showUpdatePanel({
+    ...(updateUi.payload || {}),
+    status: 'downloaded',
+    canAutoUpdate: true
+  }, { focus: true });
 });
 window.markl.on('fs:change', (payload) => handleFsChange(payload));
 window.markl.on('update:available', (payload) => {
@@ -5709,6 +5940,13 @@ document.addEventListener('compositioncancel', () => {
 
 document.addEventListener('keydown', (event) => {
   if (handleAppMenuKey(event)) return;
+  if (isSettingsOpen()) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeSettingsPanel();
+    }
+    return;
+  }
   if (isAppDialogOpen()) {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -5724,6 +5962,11 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Tab' && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
     cycleRecentFile(event.shiftKey);
+    return;
+  }
+  if (modifier && event.key === ',') {
+    event.preventDefault();
+    openSettingsPanel();
     return;
   }
   if (modifier && event.shiftKey && key === 'l' && !event.altKey) {
@@ -5789,8 +6032,10 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.key === 'Escape' && elements.revisionPanel && !elements.revisionPanel.classList.contains('hidden')) {
     event.preventDefault();
+    resetRevisionDiff();
     concealLayer(elements.revisionPanel);
   }
+
   if (event.key === 'Escape' && elements.assetPanel && !elements.assetPanel.classList.contains('hidden')) {
     event.preventDefault();
     concealLayer(elements.assetPanel);
@@ -5961,8 +6206,15 @@ function setupSidebarResize() {
 
 applySessionChrome();
 setupSidebarResize();
+try {
+  const storedPrefs = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null');
+  if (storedPrefs) applyPrefs(storedPrefs, { persist: false });
+} catch {
+  // 沿用默认偏好。
+}
 applyAppearance(readStoredAppearance());
 persistAppearance();
+document.addEventListener('selectionchange', () => updateCounts());
 updateTitle();
 updateCounts();
 updateFindCount();
