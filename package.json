@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node scripts/dev-launch.js",
     "test": "node src/renderer/text-search.test.js && node src/lib/encoding.test.js && node src/lib/text-diff.test.js && node src/lib/prefs.test.js && node src/lib/word-count.test.js && node src/renderer/path-utils.test.js",
+    "test:editor": "node scripts/test-editor.cjs",
     "make-icon": "node scripts/make-icon.js",
     "build": "npm run make-icon && electron-builder --win",
     "build:mac": "npm run make-icon && electron-builder --mac",

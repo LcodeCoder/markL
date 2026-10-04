@@ -15,6 +15,7 @@ import {
   parseHeadingOutline
 } from './text-search.js';
 import { typesetChineseMarkdown } from './zh-typeset.js';
+import { createHtmlEditing } from './html-editing.js';
 import { DOC_TEMPLATES, templateById, fileNameForTemplate } from './templates.js';
 import { collapseUnchanged, diffLines } from '../lib/text-diff.js';
 import { countMarkdownStats, countProse } from '../lib/word-count.js';
@@ -88,7 +89,7 @@ const THEME_SWATCHES = {
   dusk: '#222c3a'
 };
 const FONT_STACKS = {
-  default: '"Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Segoe UI", sans-serif',
+  default: '"Helvetica Neue", "PingFang SC", "Microsoft YaHei", "Segoe UI", Arial, sans-serif',
   yahei: '"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif',
   song: 'SimSun, "Songti SC", "Noto Serif SC", "Source Han Serif SC", serif',
   kai: 'KaiTi, STKaiti, "Kaiti SC", "Noto Serif SC", serif',
@@ -98,7 +99,7 @@ const FONT_STACKS = {
 };
 const FONT_SIZES = {
   small: '15.5px',
-  medium: '16.5px',
+  medium: '16px',
   large: '18px',
   xlarge: '20px'
 };
@@ -110,8 +111,8 @@ const SIDEBAR_MAX = 480;
 const SIDEBAR_DEFAULT = 280;
 const PREFS_KEY = 'markl-prefs';
 const MEASURE_CSS = {
-  narrow: '860px',
-  standard: '1120px',
+  narrow: '720px',
+  standard: '860px',
   wide: '1440px',
   full: 'none'
 };
@@ -284,6 +285,7 @@ function escapeRegExp(value) {
 }
 
 let vditor = null;
+let htmlEditing = null;
 
 function getMarkdown() {
   const raw = state.sourceMode
@@ -297,9 +299,13 @@ function getHTML() {
 }
 
 function setMarkdown(content, clearStack = true) {
+  htmlEditing?.close(false);
   const value = content || '';
   elements.sourceEditor.value = value;
-  if (vditor && state.editorReady) vditor.setValue(value, clearStack);
+  if (vditor && state.editorReady) {
+    vditor.setValue(value, clearStack);
+    htmlEditing?.schedule();
+  }
 }
 
 let editorComposing = false;
@@ -332,7 +338,7 @@ function isHiddenVisual(el) {
 
 function isUnusableCaretHost(el) {
   if (!el) return true;
-  if (el.closest('.markl-live-hl, .language-popup, .table-toolbar, .find-bar, .update-panel, #quick-open, #app-dialog, #source-editor, .format-menu')) return true;
+  if (el.closest('.markl-live-hl, .language-popup, .table-toolbar, .find-bar, .update-panel, #quick-open, #app-dialog, #source-editor, .format-menu, .html-source-popover')) return true;
   if (el.closest('.vditor-ir__preview')) return true;
   if (el.closest('[data-type$="-open-marker"], [data-type$="-close-marker"]')) return true;
   const ir = getIrElement();
@@ -593,16 +599,30 @@ function selectionProse() {
   return visibleProseFromMarkdown(raw);
 }
 
-function updateCounts() {
-  const markdown = getMarkdown() || '';
-  const text = visibleProseFromMarkdown(markdown);
-  const prose = countProse(text);
-  const stats = countMarkdownStats(markdown, selectionProse());
-  let label = `${prose.words} 字 · ${prose.characters} 字符 · ${stats.lines} 行 · ${stats.paragraphs} 段`;
-  if (stats.selection) {
-    label += ` · 选区 ${stats.selection.words} 字`;
+let countsCache = { markdown: null, prose: null, stats: null };
+let countsFrame = 0;
+
+function updateCounts(markdown = getMarkdown()) {
+  if (markdown !== countsCache.markdown) {
+    countsCache = {
+      markdown,
+      prose: countProse(visibleProseFromMarkdown(markdown)),
+      stats: countMarkdownStats(markdown)
+    };
   }
-  elements.counts.textContent = label;
+  const { prose, stats } = countsCache;
+  let label = `${prose.words} 字 · ${prose.characters} 字符 · ${stats.lines} 行 · ${stats.paragraphs} 段`;
+  const selected = selectionProse();
+  if (selected) label += ` · 选区 ${countProse(selected).words} 字`;
+  if (elements.counts.textContent !== label) elements.counts.textContent = label;
+}
+
+function scheduleCounts() {
+  if (countsFrame) return;
+  countsFrame = requestAnimationFrame(() => {
+    countsFrame = 0;
+    updateCounts(countsCache.markdown ?? getMarkdown());
+  });
 }
 
 function markClean(content) {
@@ -612,13 +632,13 @@ function markClean(content) {
   updateTitle();
 }
 
-function recomputeDirty() {
-  const dirty = state.fileMissing || getMarkdown() !== state.savedContent;
+function recomputeDirty(markdown = getMarkdown()) {
+  const dirty = state.fileMissing || markdown !== state.savedContent;
   if (dirty !== state.dirty) {
     state.dirty = dirty;
     updateTitle();
   }
-  updateCounts();
+  updateCounts(markdown);
   scheduleOutlineRefresh();
   persistDraftSoon();
   scheduleAutoSave();
@@ -633,6 +653,7 @@ function applyEditorMode(wantSource) {
     syncSourceChrome();
     return;
   }
+  htmlEditing?.close(false);
   state.sourceMode = next;
   document.getElementById('editor')?.classList.toggle('hidden', next);
   elements.sourceWrap?.classList.toggle('hidden', !next);
@@ -2397,6 +2418,7 @@ function openLanguagePopup(query = '') {
   elements.languageQueryInput.value = query;
   renderLanguagePopup();
   requestAnimationFrame(() => {
+    if (!state.popup.visible) return;
     positionLanguagePopup();
     elements.languageQueryInput.focus();
     elements.languageQueryInput.select();
@@ -2412,7 +2434,6 @@ function closeLanguagePopup(options = {}) {
   if (restore) restoreEditorFocus();
 }
 
-let highlightingPreviews = false;
 let highlightTimer = 0;
 
 function previewLanguage(block, code) {
@@ -2424,10 +2445,6 @@ function previewLanguage(block, code) {
     || classLang
     || ''
   );
-}
-
-function hasHighlightSpans(code) {
-  return Boolean(code.querySelector('span[class*="hljs-"]'));
 }
 
 const HIGHLIGHT_EXTRAS = {
@@ -2534,34 +2551,31 @@ function highlightSource(source, language) {
   return decorateHighlightExtras(html, lang);
 }
 
+const previewHighlightCache = new WeakMap();
+
 function highlightCodePreviews() {
   if (!window.hljs || isEditorComposing()) return;
-  highlightingPreviews = true;
   const selHost = selectionHost();
-  try {
-    document.querySelectorAll('[data-type="code-block"] .vditor-ir__preview code').forEach((code) => {
-      const block = code.closest('[data-type="code-block"]');
-      if (block?.classList.contains('vditor-ir__node--expand')) return;
-      if (selHost && block?.contains(selHost)) return;
-      const language = previewLanguage(block, code);
-      if (!language || language === 'text' || !window.hljs.getLanguage(language)) return;
-      const source = code.textContent.replace(/\u200b/g, '');
-      const key = `${language}\0${source}`;
-      if (code.dataset.marklHl === key && hasHighlightSpans(code)) return;
-      code.className = `language-${language} hljs`;
-      code.innerHTML = highlightSource(source, language);
-      code.dataset.marklHl = key;
-      if (block) block.dataset.lang = language;
-    });
-  } finally {
-    highlightingPreviews = false;
-  }
+  document.querySelectorAll('[data-type="code-block"] .vditor-ir__preview code').forEach((code) => {
+    const block = code.closest('[data-type="code-block"]');
+    if (block?.classList.contains('vditor-ir__node--expand')) return;
+    if (selHost && block?.contains(selHost)) return;
+    const language = previewLanguage(block, code);
+    if (!language || language === 'text' || !window.hljs.getLanguage(language)) return;
+    const source = code.textContent.replace(/\u200b/g, '');
+    const key = `${language}\0${source}`;
+    const cached = previewHighlightCache.get(code);
+    if (cached?.key === key && cached.html === code.innerHTML && code.classList.contains('hljs')) return;
+    code.className = `language-${language} hljs`;
+    code.innerHTML = highlightSource(source, language);
+    previewHighlightCache.set(code, { key, html: code.innerHTML });
+    if (block) block.dataset.lang = language;
+  });
 }
 
 function scheduleCodeHighlight() {
   if (isEditorComposing()) return;
   updateLiveHighlight();
-  highlightCodePreviews();
   window.clearTimeout(highlightTimer);
   highlightTimer = window.setTimeout(() => {
     if (isEditorComposing()) return;
@@ -2617,11 +2631,15 @@ function setCodeIme(active) {
 
 function paintLiveHighlight() {
   const block = activeCodeBlock();
+  elements.editorWrap.querySelectorAll('.markl-live-code').forEach((node) => {
+    if (node !== block) node.classList.remove('markl-live-code');
+  });
   const pre = block?.querySelector('.vditor-ir__marker--pre');
   const code = pre?.querySelector('code');
   const layer = liveHighlightLayer();
   if (!block || !pre || !code || isEditorComposing()) {
     layer.classList.add('hidden');
+    block?.classList.remove('markl-live-code');
     if (!block || !pre || !code) layer.dataset.marklSrc = '';
     return;
   }
@@ -2672,6 +2690,7 @@ function paintLiveHighlight() {
   layer.style.width = `${contentWidth}px`;
   layer.style.minHeight = `${contentHeight}px`;
   layer.classList.remove('hidden');
+  block.classList.add('markl-live-code');
 
   const codeGlyph = firstVisibleCharRect(code);
   const layerGlyph = firstVisibleCharRect(layer);
@@ -2686,8 +2705,7 @@ function paintLiveHighlight() {
 let liveHlRaf = 0;
 
 function updateLiveHighlight() {
-  paintLiveHighlight();
-  if (liveHlRaf) cancelAnimationFrame(liveHlRaf);
+  if (liveHlRaf) return;
   liveHlRaf = requestAnimationFrame(() => {
     liveHlRaf = 0;
     paintLiveHighlight();
@@ -3210,14 +3228,24 @@ function watchCodeHighlight() {
   const root = document.getElementById('editor');
   if (!root || root.dataset.marklWatch === '1') return;
   root.dataset.marklWatch = '1';
-  const observer = new MutationObserver(() => {
-    if (state.sourceMode || highlightingPreviews || isEditorComposing()) return;
-    window.clearTimeout(highlightTimer);
-    highlightTimer = window.setTimeout(() => {
-      highlightCodePreviews();
-      updateLiveHighlight();
-      balanceEditorTables();
-    }, 90);
+  const observer = new MutationObserver((records) => {
+    if (state.sourceMode || isEditorComposing()) return;
+    let codeChanged = false;
+    let tableChanged = false;
+    for (const record of records) {
+      const host = record.target.nodeType === Node.ELEMENT_NODE ? record.target : record.target.parentElement;
+      // Highlighting only changes the preview's children. It must not trigger itself.
+      if (host?.closest('.vditor-ir__preview')) continue;
+      codeChanged ||= Boolean(host?.closest('[data-type="code-block"]'));
+      tableChanged ||= Boolean(host?.closest('table'));
+      for (const node of record.addedNodes) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        codeChanged ||= node.matches('[data-type="code-block"]') || Boolean(node.querySelector('[data-type="code-block"]'));
+        tableChanged ||= node.matches('table') || Boolean(node.querySelector('table'));
+      }
+    }
+    if (codeChanged) scheduleCodeHighlight();
+    if (tableChanged) scheduleTableBalance();
   });
   observer.observe(root, { childList: true, subtree: true, characterData: true });
   if (typeof ResizeObserver !== 'undefined') {
@@ -4990,13 +5018,24 @@ function createVditor() {
       applyVditorTheme(state.appearance.theme);
       decorateCodeBlocks();
       watchCodeHighlight();
+      htmlEditing = createHtmlEditing({
+        root: getIrElement(),
+        getEditor: () => vditor,
+        isComposing: isEditorComposing,
+        onChange() {
+          recomputeDirty();
+          scheduleImageResolve();
+          scheduleFindRefresh();
+        }
+      });
       scheduleTableToolbar();
       renderTemplateBar();
       renderPinnedList();
       restoreOnStartup();
     },
-    input() {
-      recomputeDirty();
+    input(markdown) {
+      recomputeDirty(sanitizeImageMarkdown(markdown));
+      htmlEditing?.schedule();
       scheduleCodeHighlight();
       scheduleImageResolve();
       scheduleFindRefresh();
@@ -5432,7 +5471,7 @@ document.getElementById('editor').addEventListener('keyup', (event) => {
 document.addEventListener('selectionchange', () => {
   scheduleOutlineActive();
   if (state.sourceMode) return;
-  scheduleCodeHighlight();
+  updateLiveHighlight();
   scheduleTableToolbar();
 });
 
@@ -5929,6 +5968,7 @@ document.addEventListener('compositionend', () => {
   const ir = irController();
   if (ir) ir.composingLock = false;
   setCodeIme(false);
+  htmlEditing?.schedule();
   scheduleCodeHighlight();
 }, true);
 
@@ -6214,7 +6254,7 @@ try {
 }
 applyAppearance(readStoredAppearance());
 persistAppearance();
-document.addEventListener('selectionchange', () => updateCounts());
+document.addEventListener('selectionchange', scheduleCounts);
 updateTitle();
 updateCounts();
 updateFindCount();
